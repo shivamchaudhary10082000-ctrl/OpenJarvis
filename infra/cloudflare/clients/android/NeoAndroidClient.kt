@@ -2,6 +2,8 @@ package com.neo.client
 
 import android.content.Context
 import android.util.Base64
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -49,7 +51,7 @@ class NeoAndroidClient(
             .header("X-NEO-Device-ID", deviceId)
             .post(body.toRequestBody("application/json".toMediaType()))
             .build()
-        return http.newCall(request).execute()
+        return withContext(Dispatchers.IO) { http.newCall(request).execute() }
     }
 
     suspend fun signedRequest(method: String, pathAndQuery: String, body: ByteArray = ByteArray(0), contentType: String? = null): okhttp3.Response {
@@ -77,7 +79,7 @@ class NeoAndroidClient(
             "PATCH" -> builder.patch(body.toRequestBody(media))
             else -> error("Unsupported HTTP method")
         }
-        return http.newCall(builder.build()).execute()
+        return withContext(Dispatchers.IO) { http.newCall(builder.build()).execute() }
     }
 
     suspend fun syncApprovedMemory(cursor: String? = null): okhttp3.Response {

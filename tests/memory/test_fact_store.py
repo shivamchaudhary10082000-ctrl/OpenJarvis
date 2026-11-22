@@ -504,6 +504,7 @@ def test_load_configured_facts_skips_disabled_memory():
 
     assert load_configured_facts(config) == []
 
+
 def test_pending_fact_is_not_recallable_and_requires_explicit_approval(tmp_path):
     path = tmp_path / "pending.jsonl"
     store = LocalFactStore(path)

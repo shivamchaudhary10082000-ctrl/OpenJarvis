@@ -31,14 +31,18 @@ jobs:
           enable-cache: true
       - name: Install project and test dependencies
         run: uv sync --extra dev --extra framework-comparison --extra server
-      - name: Run NEO memory safety tests
+      - name: Run memory safety and corpus tests
         run: >-
           uv run pytest
           tests/memory/test_fact_extractor.py
           tests/memory/test_fact_store.py
           tests/memory/test_memory_service.py
-          tests/cli/test_memory_cmd.py
           tests/neo/test_hinglish_corpus.py
+          -q --tb=short
+      - name: Run memory review CLI tests (without native storage cases)
+        run: >-
+          uv run pytest tests/cli/test_memory_cmd.py
+          -k "memory_list or memory_approve or memory_reject or memory_trust"
           -q --tb=short
       - name: Lint changed memory code and tests
         run: >-

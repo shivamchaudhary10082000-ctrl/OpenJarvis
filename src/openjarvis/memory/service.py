@@ -23,7 +23,7 @@ from typing import Any, List, Optional
 from openjarvis.core.events import Event, EventBus, EventType
 from openjarvis.memory.extractor import FactExtractor
 from openjarvis.memory.store import (
-    TRUST_AUTO,
+    TRUST_PENDING,
     TRUST_UNTRUSTED,
     Fact,
     FactStore,
@@ -221,16 +221,24 @@ class MemoryService:
         facts = self._extractor.extract(user_text, assistant_text)
         if not facts:
             return
-        # Provenance is per fact, not per exchange: a fact whose own text trips
-        # the scanner is quarantined (stored for audit, filtered out of every
-        # model-facing path), while clean facts stay recallable — otherwise
-        # tagging everything "untrusted" would make automatic memory write-only.
-        clean: List[str] = []
+        # New extractions are never immediately recallable. Clean candidates
+        # remain pending until the user explicitly approves them; scanner-
+        # flagged candidates remain quarantined. Scanner outages also fail
+        # closed because _scan returns None and no clean candidate can be
+        # distinguished from an unchecked one.
+        pending: List[str] = []
         quarantined: List[str] = []
         for fact in facts:
-            target = quarantined if self._flagged(self._scan(fact)) else clean
-            target.append(fact)
-        stored = self._store.add_many_with_trust(clean, source="auto", trust=TRUST_AUTO)
+            scan = self._scan(fact)
+            if scan is None:
+                quarantined.append(fact)
+            elif self._flagged(scan):
+                quarantined.append(fact)
+            else:
+                pending.append(fact)
+        stored = self._store.add_many_with_trust(
+            pending, source="auto", trust=TRUST_PENDING
+        )
         if quarantined:
             stored += self._store.add_many_with_trust(
                 quarantined, source="auto", trust=TRUST_UNTRUSTED

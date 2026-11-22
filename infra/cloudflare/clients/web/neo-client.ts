@@ -3,7 +3,7 @@ type StoredIdentity = { deviceId:string; privateKey:CryptoKey; publicJwk:JsonWeb
 const enc = new TextEncoder();
 const toB64u = (bytes:Uint8Array) => {
   let binary=""; for(const b of bytes) binary+=String.fromCharCode(b);
-  return btoa(binary).replace(/=/g,"").replace(/\\+/g,"-").replace(/\\//g,"_");
+  return btoa(binary).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
 };
 const fromB64u = (s:string) => Uint8Array.from(atob(s.replace(/-/g,"+").replace(/_/g,"/")+"=".repeat((4-s.length%4)%4)),c=>c.charCodeAt(0));
 const randomId = () => toB64u(crypto.getRandomValues(new Uint8Array(24)));
@@ -39,7 +39,7 @@ export class NeoDeviceClient {
       identity={deviceId:randomId(),privateKey,publicJwk};
       await saveIdentity(identity);
     }
-    return new NeoDeviceClient(baseUrl.replace(/\\/$/,""),accessToken,identity);
+    return new NeoDeviceClient(baseUrl.endsWith("/") ? baseUrl.slice(0,-1) : baseUrl,accessToken,identity);
   }
   get deviceId(){return this.identity.deviceId;}
   async enrol(label:string,platform:DevicePlatform,capabilities:string[]=[]){

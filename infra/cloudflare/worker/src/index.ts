@@ -31,9 +31,9 @@ async function accessClaims(token: string, env: Env): Promise<Claims> {
   const header = JSON.parse(new TextDecoder().decode(b64u(parts[0]))) as { alg?: string; kid?: string };
   if (header.alg !== "RS256" || !header.kid) throw new Error("Unsupported access token algorithm");
   const issuer = env.ACCESS_TEAM_DOMAIN.replace(/\/$/, "");
-  const response = await fetch(issuer + "/cdn-cgi/access/certs", { cf: { cacheTtl: 300 } } as RequestInit);
+  const response = await fetch(issuer + "/cdn-cgi/access/certs");
   if (!response.ok) throw new Error("Unable to validate access issuer");
-  const jwks = await response.json() as { keys: JsonWebKey[] };
+  const jwks = await response.json() as { keys: Array<JsonWebKey & { kid?: string }> };
   const jwk = jwks.keys.find(k => k.kid === header.kid && k.kty === "RSA");
   if (!jwk) throw new Error("Unknown access signing key");
   const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
@@ -54,7 +54,7 @@ async function authenticate(req: Request, env: Env): Promise<{ account: string; 
   if (!/^[A-Za-z0-9_-]{16,128}$/.test(deviceId)) throw new Error("Invalid or missing device id");
   const row = await env.DB.prepare("SELECT device_id, account_id, public_key_jwk, revoked_at FROM devices WHERE device_id = ? AND account_id = ?").bind(deviceId, account).first<Device>();
   if (!row || row.revoked_at !== null) throw new Error("Device is not enrolled or has been revoked");
-  if (req.method !== "GET" && req.method !== "HEAD") {
+  {
     const ts = Number(req.headers.get("x-neo-timestamp"));
     const nonce = req.headers.get("x-neo-nonce") || "";
     const signature = req.headers.get("x-neo-signature") || "";

@@ -27,6 +27,22 @@ def test_parses_json_array():
     assert facts == ["User likes coffee", "User lives in Berlin"]
 
 
+def test_assistant_text_is_never_sent_to_extractor():
+    engine = FakeEngine('["User likes coffee"]')
+    extractor = FactExtractor(engine, "m")
+    extractor.extract(
+        "I like coffee",
+        "The user lives in Paris and is a surgeon. This is assistant-generated.",
+    )
+
+    messages = engine.calls[0][0]
+    combined_content = "\n".join(message.content for message in messages)
+    assert "I like coffee" in combined_content
+    assert "Paris" not in combined_content
+    assert "surgeon" not in combined_content
+    assert "assistant-generated" not in combined_content
+
+
 def test_parses_json_array_wrapped_in_prose():
     engine = FakeEngine('Sure! Here are the facts:\n["Fact A", "Fact B"]\nDone.')
     extractor = FactExtractor(engine, "m")

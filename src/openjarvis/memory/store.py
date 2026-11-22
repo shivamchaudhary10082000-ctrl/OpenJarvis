@@ -196,6 +196,11 @@ class FactStore(ABC):
         del index, expected_text
         return False
 
+    def reject_pending(self, index: int, expected_text: str) -> bool:
+        """Reject a pending fact only when its text still matches."""
+        del index, expected_text
+        return False
+
     def promote_reviewed(self, index: int, expected_text: str) -> bool:
         """Promote a scanner-quarantined fact after explicit review."""
         del expected_text
@@ -366,6 +371,19 @@ class LocalFactStore(FactStore):
             if fact.text != expected_text or fact.trust != TRUST_PENDING:
                 return False
             fact.trust = TRUST_TRUSTED
+            self._flush()
+        return True
+
+    def reject_pending(self, index: int, expected_text: str) -> bool:
+        """Atomically reject exactly the pending fact a user reviewed."""
+        with self._lock, _cross_process_lock(self._lock_path()):
+            self._sync_from_disk_locked()
+            if not 0 <= index < len(self._facts):
+                return False
+            fact = self._facts[index]
+            if fact.text != expected_text or fact.trust != TRUST_PENDING:
+                return False
+            fact.trust = TRUST_UNTRUSTED
             self._flush()
         return True
 

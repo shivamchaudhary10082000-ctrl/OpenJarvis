@@ -222,7 +222,7 @@ def list_facts() -> None:
     table.add_column("Trust")
     any_quarantined = False
     for i, fact in enumerate(facts, 1):
-        quarantined = not fact.trusted_for_recall
+        quarantined = not fact.trusted_for_recall and fact.trust != "pending"
         any_quarantined = any_quarantined or quarantined
         if fact.trust == "pending":
             trust_disp = "[yellow]pending approval[/yellow]"

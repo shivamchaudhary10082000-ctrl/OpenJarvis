@@ -230,11 +230,11 @@ class MemoryService:
         quarantined: List[str] = []
         for fact in facts:
             scan = self._scan(fact)
-            if scan is None:
-                quarantined.append(fact)
-            elif self._flagged(scan):
+            if scan is not None and self._flagged(scan):
                 quarantined.append(fact)
             else:
+                # No scanner or a scanner failure is not evidence of safety;
+                # keep the candidate pending rather than making it recallable.
                 pending.append(fact)
         stored = self._store.add_many_with_trust(
             pending, source="auto", trust=TRUST_PENDING

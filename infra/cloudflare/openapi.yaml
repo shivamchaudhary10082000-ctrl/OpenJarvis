@@ -3,7 +3,7 @@ info:
   title: NEO Cloud API
   version: 0.1.0
   description: >
-    Draft contract for the cloud-first NEO gateway. All payloads containing
+    Implemented v0 contract for the cloud-first NEO gateway. All payloads containing
     memory or task content are client-encrypted. This specification is not
     implemented or deployed yet.
 servers:

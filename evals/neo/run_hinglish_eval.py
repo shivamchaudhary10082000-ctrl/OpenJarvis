@@ -41,7 +41,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=os.getenv("NEO_EVAL_BASE_URL", ""))
     parser.add_argument("--model", default=os.getenv("NEO_EVAL_MODEL", ""))
-    parser.add_argument("--api-key", default=os.getenv("NEO_EVAL_API_KEY", ""))
+    parser.add_argument("--temperature", type=float)
     parser.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--limit", type=int)
@@ -66,7 +66,8 @@ def main() -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
 
     endpoint = args.base_url.rstrip("/") + "/chat/completions"
-    headers = {"Authorization": f"Bearer {args.api_key}"} if args.api_key else {}
+    api_key = os.getenv("NEO_EVAL_API_KEY", "")
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
     try:
         with httpx.Client(timeout=args.timeout) as client, output.open(
@@ -76,9 +77,10 @@ def main() -> int:
                 payload = {
                     "model": args.model,
                     "messages": case["turns"],
-                    "temperature": 0.2,
                     "max_tokens": 700,
                 }
+                if args.temperature is not None:
+                    payload["temperature"] = args.temperature
                 started = time.perf_counter()
                 response = client.post(endpoint, headers=headers, json=payload)
                 response.raise_for_status()

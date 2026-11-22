@@ -1,0 +1,28 @@
+name: NEO Cloudflare Worker
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "infra/cloudflare/**"
+  push:
+    branches: [main]
+    paths:
+      - "infra/cloudflare/**"
+permissions:
+  contents: read
+jobs:
+  worker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/cloudflare/worker
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: infra/cloudflare/worker/package.json
+      - run: npm install --ignore-scripts
+      - run: npm run check
+      - run: npm test

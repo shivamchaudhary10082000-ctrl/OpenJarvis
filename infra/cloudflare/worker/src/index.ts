@@ -154,7 +154,7 @@ async function route(req: Request, env: Env): Promise<Response> {
       const pendingState = includePending ? "pending" : "approved";
       const rows = await env.DB.prepare("SELECT memory_id, revision, trust_state, payload_ciphertext, payload_nonce, key_version, source_device_id, source_kind, created_at, updated_at, tombstoned_at FROM memory_records WHERE account_id = ? AND (updated_at > ? OR (updated_at = ? AND memory_id > ?)) AND trust_state IN ('approved','deleted',?) ORDER BY updated_at, memory_id LIMIT 200").bind(account,cursorTime,cursorTime,cursorId,pendingState).all();
       const last = rows.results.length ? rows.results[rows.results.length - 1] as any : null;
-      const next = last ? btoa(JSON.stringify({t:Number(last.updated_at),id:String(last.memory_id)})).replace(/=/g,"").replace(/\\+/g,"-").replace(/\\//g,"_") : null;
+      const next = last ? btoa(JSON.stringify({t:Number(last.updated_at),id:String(last.memory_id)})).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_") : null;
       return json({ records: rows.results, next_cursor: next });
     }
     if (path === "/memory" && req.method === "POST") {

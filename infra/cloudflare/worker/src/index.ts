@@ -263,7 +263,19 @@ async function voiceRoute(req:Request,env:Env,mode:"transcribe"|"synthesize"):Pr
   const data=await req.arrayBuffer();
   if(data.byteLength>15_000_000)return fail(413,"body_too_large","Voice payload exceeds 15 MB");
   const endpoint=mode==="transcribe"?"/audio/transcriptions":"/audio/speech";
-  const upstream=await fetch(url.replace(/\/$/,"")+endpoint,{method:"POST",headers:{"authorization":"Bearer "+key,"content-type":req.headers.get("content-type")||"application/octet-stream"},body:data,signal:AbortSignal.timeout(90_000)});
+  let body:BodyInit=data;
+  const headers:Record<string,string>={"authorization":"Bearer "+key};
+  if(mode==="transcribe"){
+    const form=new FormData();
+    const contentType=req.headers.get("content-type")||"audio/webm";
+    const extension=contentType.includes("wav")?"wav":contentType.includes("mpeg")?"mp3":"webm";
+    form.append("file",new Blob([data],{type:contentType}),"neo-audio."+extension);
+    form.append("model","whisper-1");
+    body=form;
+  } else {
+    headers["content-type"]="application/json";
+  }
+  const upstream=await fetch(url.replace(/\/$/,"")+endpoint,{method:"POST",headers,body,signal:AbortSignal.timeout(90_000)});
   return new Response(upstream.body,{status:upstream.status,headers:{"content-type":upstream.headers.get("content-type")||"application/octet-stream","cache-control":"no-store"}});
 }
 export default { fetch: (req:Request,env:Env) => route(req,env) };

@@ -41,8 +41,7 @@ CREATE TABLE IF NOT EXISTS memory_records (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   tombstoned_at INTEGER,
-  PRIMARY KEY (memory_id, revision),
-  UNIQUE(account_id, memory_id, revision)
+  PRIMARY KEY (account_id, memory_id, revision)
 );
 
 CREATE INDEX IF NOT EXISTS memory_by_account_updated

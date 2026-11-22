@@ -224,11 +224,12 @@ def list_facts() -> None:
     for i, fact in enumerate(facts, 1):
         quarantined = not fact.trusted_for_recall
         any_quarantined = any_quarantined or quarantined
-        trust_disp = (
-            "[red]⚠ quarantined[/red]"
-            if quarantined
-            else f"[green]{fact.trust or 'legacy'}[/green]"
-        )
+        if fact.trust == "pending":
+            trust_disp = "[yellow]pending approval[/yellow]"
+        elif quarantined:
+            trust_disp = "[red]⚠ quarantined[/red]"
+        else:
+            trust_disp = f"[green]{fact.trust or 'legacy'}[/green]"
         table.add_row(str(i), fact.text, fact.source or "-", trust_disp)
     console.print(table)
     if any_quarantined:
@@ -237,6 +238,52 @@ def list_facts() -> None:
             "from model recall because they may contain hostile input. Review "
             "one and run [bold]jarvis memory trust <#>[/bold] to allow recall."
         )
+    if any(fact.trust == "pending" for fact in facts):
+        console.print(
+            "[yellow]pending approval[/yellow] facts are not available to the AI. "
+            "Use [bold]jarvis memory approve <#>[/bold] or "
+            "[bold]jarvis memory reject <#>[/bold] after reviewing each fact."
+        )
+
+
+@memory.command(name="approve")
+@click.argument("index", type=int)
+def approve_fact(index: int) -> None:
+    """Approve pending fact INDEX for future model recall."""
+    console = Console()
+    store = _get_fact_store()
+    facts = store.list()
+    if not 1 <= index <= len(facts):
+        raise click.ClickException(f"No fact #{index}; run 'jarvis memory list'.")
+    fact = facts[index - 1]
+    if fact.trust != "pending":
+        raise click.ClickException(f"Fact #{index} is not pending approval.")
+    if not click.confirm(f"Approve this fact for future AI recall?\\n  {fact.text}"):
+        console.print("[dim]Aborted.[/dim]")
+        return
+    if not store.approve_pending(index - 1, fact.text):
+        raise click.ClickException("Fact changed during review; list facts and retry.")
+    console.print(f"[green]Approved fact #{index} for future recall.[/green]")
+
+
+@memory.command(name="reject")
+@click.argument("index", type=int)
+def reject_fact(index: int) -> None:
+    """Reject pending fact INDEX so it remains excluded from recall."""
+    console = Console()
+    store = _get_fact_store()
+    facts = store.list()
+    if not 1 <= index <= len(facts):
+        raise click.ClickException(f"No fact #{index}; run 'jarvis memory list'.")
+    fact = facts[index - 1]
+    if fact.trust != "pending":
+        raise click.ClickException(f"Fact #{index} is not pending approval.")
+    if not click.confirm(f"Reject this memory candidate?\\n  {fact.text}"):
+        console.print("[dim]Aborted.[/dim]")
+        return
+    if not store.reject_pending(index - 1, fact.text):
+        raise click.ClickException("Fact changed during review; list facts and retry.")
+    console.print(f"[green]Rejected fact #{index}; it remains excluded from recall.[/green]")
 
 
 @memory.command(name="trust")

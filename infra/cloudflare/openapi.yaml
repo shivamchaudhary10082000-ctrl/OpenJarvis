@@ -207,13 +207,19 @@ paths:
           application/json:
             schema:
               type: object
-              required: [task_kind, payload_ciphertext]
+              required: [task_kind, payload_ciphertext, payload_nonce, key_version]
               properties:
                 task_kind:
                   type: string
                 payload_ciphertext:
                   type: string
                   contentEncoding: base64
+                payload_nonce:
+                  type: string
+                  contentEncoding: base64
+                key_version:
+                  type: integer
+                  minimum: 1
       responses:
         "202":
           description: Task queued

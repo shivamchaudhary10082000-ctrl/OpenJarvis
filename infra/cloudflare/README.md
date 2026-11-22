@@ -1,6 +1,10 @@
 # NEO Cloudflare infrastructure scaffold
 
-This directory is a schema baseline only. It is not connected to a Cloudflare account and must not be treated as a deployable service yet.
+This directory contains a D1 schema baseline and a draft OpenAPI contract only. It is not connected to a Cloudflare account and must not be treated as a deployable service yet.
+
+## Contract
+
+See `openapi.yaml` for the draft device, encrypted-memory, task-lease, and chat-routing API. The contract is not backed by Worker handlers yet; do not generate clients or rely on it as a live API until implementation and contract tests exist.
 
 ## Intended resources
 

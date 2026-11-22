@@ -283,7 +283,9 @@ def reject_fact(index: int) -> None:
         return
     if not store.reject_pending(index - 1, fact.text):
         raise click.ClickException("Fact changed during review; list facts and retry.")
-    console.print(f"[green]Rejected fact #{index}; it remains excluded from recall.[/green]")
+    console.print(
+        f"[green]Rejected fact #{index}; it remains excluded from recall.[/green]"
+    )
 
 
 @memory.command(name="trust")

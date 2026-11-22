@@ -204,6 +204,7 @@ jobs:
           cache: npm
           cache-dependency-path: infra/cloudflare/worker/package.json
       - run: npm install --ignore-scripts
+      - run: npm audit --audit-level=moderate
       - run: npm run check
       - run: npm test
 

@@ -78,6 +78,8 @@ async function authenticate(req: Request, env: Env): Promise<{ account: string; 
 }
 async function bodyJson<T>(req: Request, env: Env): Promise<T> {
   const max = Number(env.MAX_BODY_BYTES || 1_000_000);
+  const declaredLength = Number(req.headers.get("content-length") || 0);
+  if (declaredLength > max) throw new Error("Request body too large");
   const raw = await req.arrayBuffer();
   if (raw.byteLength > max) throw new Error("Request body too large");
   return JSON.parse(new TextDecoder().decode(raw)) as T;
@@ -159,7 +161,7 @@ async function route(req: Request, env: Env): Promise<Response> {
     }
     if (path === "/memory" && req.method === "POST") {
       const x = await bodyJson<any>(req,env);
-      if (!validCipher(x) || typeof x.memory_id !== "string" || x.memory_id.length > 128) return fail(400,"invalid_memory","Invalid encrypted memory payload");
+      if (!validCipher(x) || typeof x.memory_id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(x.memory_id)) return fail(400,"invalid_memory","Invalid encrypted memory payload");
       const rev = await env.DB.prepare("SELECT COALESCE(MAX(revision),0)+1 AS revision FROM memory_records WHERE account_id=? AND memory_id=?").bind(account,x.memory_id).first<{revision:number}>();
       const t=now();
       await env.DB.prepare("INSERT INTO memory_records(memory_id,revision,account_id,trust_state,payload_ciphertext,payload_nonce,key_version,source_device_id,source_kind,created_at,updated_at) VALUES(?,?,?,'pending',?,?,?,?,?,?,?)").bind(x.memory_id,rev?.revision || 1,account,b64u(x.payload_ciphertext),b64u(x.payload_nonce),x.key_version,device.device_id,String(x.source_kind || "user").slice(0,40),t,t).run();

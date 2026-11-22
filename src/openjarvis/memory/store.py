@@ -357,6 +357,10 @@ class LocalFactStore(FactStore):
             self._sync_from_disk_locked()
             if not 0 <= index < len(self._facts):
                 return False
+            # Pending facts can only cross the recall boundary through the
+            # dedicated compare-and-approve operation after explicit review.
+            if self._facts[index].trust == TRUST_PENDING:
+                return False
             self._facts[index].trust = trust
             self._flush()
         return True

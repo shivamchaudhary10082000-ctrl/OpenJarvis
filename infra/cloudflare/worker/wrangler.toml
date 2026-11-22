@@ -1,0 +1,22 @@
+name = "neo-api"
+main = "src/index.ts"
+compatibility_date = "2026-11-20"
+workers_dev = true
+
+[vars]
+NEO_ENV = "staging"
+ACCESS_TEAM_DOMAIN = "https://replace-with-your-team.cloudflareaccess.com"
+ACCESS_AUD = "replace-with-access-application-audience"
+MODEL_PRIMARY_NAME = "unset"
+MODEL_BACKUP_NAME = "unset"
+MODEL_PRIMARY_URL = ""
+MODEL_BACKUP_URL = ""
+
+[[d1_databases]]
+binding = "DB"
+database_name = "neo-staging"
+database_id = "REPLACE_AFTER_CREATING_D1"
+migrations_dir = "../migrations"
+
+# Configure provider credentials with: wrangler secret put MODEL_PRIMARY_API_KEY
+# Never place provider keys, Access signing keys, or user encryption keys in vars.

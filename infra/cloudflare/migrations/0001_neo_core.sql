@@ -57,9 +57,15 @@ CREATE TABLE IF NOT EXISTS task_leases (
   lease_expires_at INTEGER,
   idempotency_key TEXT NOT NULL,
   payload_ciphertext BLOB,
+  payload_nonce BLOB,
+  key_version INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  UNIQUE(account_id, idempotency_key)
+  UNIQUE(account_id, idempotency_key),
+  CHECK (
+    (payload_ciphertext IS NULL AND payload_nonce IS NULL AND key_version IS NULL)
+    OR (payload_ciphertext IS NOT NULL AND payload_nonce IS NOT NULL AND key_version > 0)
+  )
 );
 
 CREATE INDEX IF NOT EXISTS tasks_by_account_state

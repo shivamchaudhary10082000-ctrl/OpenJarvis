@@ -220,7 +220,7 @@ def test_scanner_failure_fails_open(tmp_path):
     try:
         svc.submit("hello", "hi")
         assert _wait_until(lambda: svc.fact_count() == 1)
-        assert svc.list_facts()[0].trust == "untrusted"
+        assert svc.list_facts()[0].trust == "pending"
         assert svc.list_facts()[0].trusted_for_recall is False
     finally:
         svc.stop()

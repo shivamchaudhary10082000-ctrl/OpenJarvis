@@ -37,6 +37,7 @@ jobs:
           tests/memory/test_fact_extractor.py
           tests/memory/test_fact_store.py
           tests/memory/test_memory_service.py
+          tests/neo/test_hinglish_corpus.py
           -q --tb=short
       - name: Lint changed memory code and tests
         run: >-

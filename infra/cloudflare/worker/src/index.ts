@@ -50,6 +50,8 @@ async function authenticate(req: Request, env: Env): Promise<{ account: string; 
   const claims = await accessClaims(authorization.slice(7), env);
   const account = claims.sub;
   await env.DB.prepare("INSERT OR IGNORE INTO accounts(account_id, created_at, status) VALUES(?, ?, 'active')").bind(account, now()).run();
+  const accountRow = await env.DB.prepare("SELECT status FROM accounts WHERE account_id = ?").bind(account).first<{status:string}>();
+  if (!accountRow || accountRow.status !== "active") throw new Error("Account is not active");
   const deviceId = req.headers.get("x-neo-device-id") || "";
   if (!/^[A-Za-z0-9_-]{16,128}$/.test(deviceId)) throw new Error("Invalid or missing device id");
   const row = await env.DB.prepare("SELECT device_id, account_id, public_key_jwk, revoked_at FROM devices WHERE device_id = ? AND account_id = ?").bind(deviceId, account).first<Device>();
@@ -62,7 +64,8 @@ async function authenticate(req: Request, env: Env): Promise<{ account: string; 
     const body = await req.clone().arrayBuffer();
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", body));
     const bodyHash = Array.from(digest, b => b.toString(16).padStart(2, "0")).join("");
-    const canonical = [req.method.toUpperCase(), new URL(req.url).pathname + new URL(req.url).search, ts, nonce, bodyHash].join("\n");
+    const requestUrl = new URL(req.url);
+    const canonical = [req.method.toUpperCase(), requestUrl.host, requestUrl.pathname + requestUrl.search, ts, nonce, bodyHash].join("\n");
     const jwk = JSON.parse(row.public_key_jwk) as JsonWebKey;
     const key = await crypto.subtle.importKey("jwk", jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
     if (!await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, b64u(signature), enc.encode(canonical))) throw new Error("Invalid device signature");
@@ -157,10 +160,11 @@ async function route(req: Request, env: Env): Promise<Response> {
     if (approve && req.method === "POST") {
       const expected=Number((req.headers.get("if-match")||"").replaceAll('"',""));
       if (!Number.isInteger(expected) || expected < 1) return fail(428,"precondition_required","If-Match revision is required");
-      const r=await env.DB.prepare("UPDATE memory_records SET trust_state='approved', updated_at=? WHERE account_id=? AND memory_id=? AND revision=? AND trust_state='pending'").bind(now(),account,approve[1],expected).run();
+      const t=now();
+      const r=await env.DB.prepare("INSERT INTO memory_records(memory_id,revision,account_id,trust_state,payload_ciphertext,payload_nonce,key_version,source_device_id,source_kind,created_at,updated_at) SELECT memory_id, revision+1, account_id, 'approved', payload_ciphertext, payload_nonce, key_version, source_device_id, source_kind, created_at, ? FROM memory_records WHERE account_id=? AND memory_id=? AND revision=? AND trust_state='pending' AND NOT EXISTS (SELECT 1 FROM memory_records newer WHERE newer.account_id=? AND newer.memory_id=? AND newer.revision=?)").bind(t,account,approve[1],expected,account,approve[1],expected+1).run();
       if (!r.meta.changes) return fail(409,"revision_conflict","Memory is not pending at the expected revision");
-      await env.DB.prepare("INSERT INTO audit_events(event_id,account_id,device_id,event_type,event_metadata_json,created_at) VALUES(?,?,?,?,?,?)").bind(id(),account,device.device_id,"memory.approved",JSON.stringify({memory_id:approve[1],revision:expected}),now()).run();
-      return json({memory_id:approve[1],revision:expected,trust_state:"approved"});
+      await env.DB.prepare("INSERT INTO audit_events(event_id,account_id,device_id,event_type,event_metadata_json,created_at) VALUES(?,?,?,?,?,?)").bind(id(),account,device.device_id,"memory.approved",JSON.stringify({memory_id:approve[1],revision:expected+1}),t).run();
+      return json({memory_id:approve[1],revision:expected+1,trust_state:"approved"});
     }
     const remove = path.match(/^\/memory\/([A-Za-z0-9_-]{1,128})$/);
     if (remove && req.method === "DELETE") {

@@ -251,8 +251,8 @@ async function modelRoute(req:Request,env:Env,account:string):Promise<Response>{
     try{
       const started=Date.now();
       const response=await fetch(p.url!.replace(/\/$/,"")+"/chat/completions",{method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+p.key!},body:JSON.stringify({...x,model:p.name,stream:false}),signal:AbortSignal.timeout(60_000)});
-      if(!response.ok){lastError="provider_http_"+response.status;if(response.status<500||i===candidates.length-1) return fail(502,"provider_error",lastError);continue;}
-      const payload=await response.json();
+      if(!response.ok){lastError="provider_http_"+response.status;if((response.status<500&&response.status!==429)||i===candidates.length-1) return fail(502,"provider_error",lastError);continue;}
+      const payload=await response.json() as Record<string, unknown>;
       return json({ ...payload, neo:{provider:p.name,model:p.name,tier:i===0?"primary":"backup",fallback_used:i>0,fallback_reason:i>0?lastError:null,latency_ms:Date.now()-started,account_scope:"private"}});
     }catch(e){lastError=e instanceof Error?e.name:"provider_network_error";if(explicit||i===candidates.length-1)return fail(502,"provider_error",lastError);}
   }

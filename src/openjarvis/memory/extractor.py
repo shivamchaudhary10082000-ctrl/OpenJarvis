@@ -134,7 +134,7 @@ class FactExtractor:
         return items
 
     def _clean_fact(self, item: str) -> str:
-        fact = str(item).strip().strip("\\"'").strip()
+        fact = str(item).strip().strip("\"'").strip()
         if not fact or fact.lower() in ("[]", "none", "n/a", "null"):
             return ""
         if len(fact) > self._max_fact_chars:

@@ -16,7 +16,7 @@ Then run:
 uv run python evals/neo/run_hinglish_eval.py
 ```
 
-Optional flags: `--limit 5` for a smoke run, `--output path.jsonl`, `--timeout 120`.
+Optional flags: `--limit 5` for a smoke run, `--output path.jsonl`, `--timeout 120`, and `--temperature 0.2` when the provider supports an explicit temperature. The runner omits temperature by default so APIs that reject non-default temperature values can be evaluated.
 
 The runner sends each case's full turn history and saves the answer, requested/reported model IDs, latency, usage, and evaluation checks. It never prints the API key. Results are written locally and are not uploaded by the script.
 

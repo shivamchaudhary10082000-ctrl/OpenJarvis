@@ -258,7 +258,7 @@ def approve_fact(index: int) -> None:
     fact = facts[index - 1]
     if fact.trust != "pending":
         raise click.ClickException(f"Fact #{index} is not pending approval.")
-    if not click.confirm(f"Approve this fact for future AI recall?\\n  {fact.text}"):
+    if not click.confirm(f"Approve this fact for future AI recall?\n  {fact.text}"):
         console.print("[dim]Aborted.[/dim]")
         return
     if not store.approve_pending(index - 1, fact.text):
@@ -278,7 +278,7 @@ def reject_fact(index: int) -> None:
     fact = facts[index - 1]
     if fact.trust != "pending":
         raise click.ClickException(f"Fact #{index} is not pending approval.")
-    if not click.confirm(f"Reject this memory candidate?\\n  {fact.text}"):
+    if not click.confirm(f"Reject this memory candidate?\n  {fact.text}"):
         console.print("[dim]Aborted.[/dim]")
         return
     if not store.reject_pending(index - 1, fact.text):

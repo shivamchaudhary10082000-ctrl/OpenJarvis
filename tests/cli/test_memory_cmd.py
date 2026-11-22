@@ -264,7 +264,9 @@ def test_memory_clear_empty(tmp_path: Path, monkeypatch):
     assert "No memory facts to clear" in result.output
 
 
-def test_memory_list_distinguishes_pending_from_quarantined(tmp_path: Path, monkeypatch):
+def test_memory_list_distinguishes_pending_from_quarantined(
+    tmp_path: Path, monkeypatch
+):
     store = _patch_fact_store(monkeypatch, tmp_path)
     store.add("candidate note", source="auto", trust="pending")
 

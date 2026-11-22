@@ -141,11 +141,20 @@ async function route(req: Request, env: Env): Promise<Response> {
       return new Response(null,{status:204});
     }
     if (path === "/memory" && req.method === "GET") {
-      const cursor = Number(url.searchParams.get("cursor") || 0);
+      let cursorTime = 0, cursorId = "";
+      const token = url.searchParams.get("cursor");
+      if (token) {
+        try {
+          const parsed = JSON.parse(new TextDecoder().decode(b64u(token))) as { t:number; id:string };
+          if (!Number.isInteger(parsed.t) || typeof parsed.id !== "string") throw new Error("invalid cursor");
+          cursorTime = parsed.t; cursorId = parsed.id;
+        } catch { return fail(400, "invalid_cursor", "Invalid memory sync cursor"); }
+      }
       const includePending = url.searchParams.get("include_pending") === "true";
-      const states = includePending ? ["approved","pending"] : ["approved"];
-      const rows = await env.DB.prepare("SELECT memory_id, revision, trust_state, payload_ciphertext, payload_nonce, key_version, source_device_id, source_kind, created_at, updated_at, tombstoned_at FROM memory_records WHERE account_id = ? AND updated_at > ? AND trust_state IN ('approved','deleted',?,?) ORDER BY updated_at, memory_id LIMIT 200").bind(account,cursor,states[0],states[1] || states[0]).all();
-      const next = rows.results.length ? Math.max(...rows.results.map((r:any)=>Number(r.updated_at))) : null;
+      const pendingState = includePending ? "pending" : "approved";
+      const rows = await env.DB.prepare("SELECT memory_id, revision, trust_state, payload_ciphertext, payload_nonce, key_version, source_device_id, source_kind, created_at, updated_at, tombstoned_at FROM memory_records WHERE account_id = ? AND (updated_at > ? OR (updated_at = ? AND memory_id > ?)) AND trust_state IN ('approved','deleted',?) ORDER BY updated_at, memory_id LIMIT 200").bind(account,cursorTime,cursorTime,cursorId,pendingState).all();
+      const last = rows.results.length ? rows.results[rows.results.length - 1] as any : null;
+      const next = last ? btoa(JSON.stringify({t:Number(last.updated_at),id:String(last.memory_id)})).replace(/=/g,"").replace(/\\+/g,"-").replace(/\\//g,"_") : null;
       return json({ records: rows.results, next_cursor: next });
     }
     if (path === "/memory" && req.method === "POST") {

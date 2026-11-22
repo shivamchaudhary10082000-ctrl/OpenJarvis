@@ -1,10 +1,10 @@
 # NEO Cloudflare infrastructure scaffold
 
-This directory contains a D1 schema baseline and a draft OpenAPI contract only. It is not connected to a Cloudflare account and must not be treated as a deployable service yet.
+This directory contains the D1 schema, API contract, Worker source, and starter web/Android device clients. The Worker is implemented but has not been deployed or connected to a Cloudflare account.
 
 ## Contract
 
-See `openapi.yaml` for the draft device, encrypted-memory, task-lease, and chat-routing API. The contract is not backed by Worker handlers yet; do not generate clients or rely on it as a live API until implementation and contract tests exist.
+See `openapi.yaml` for the draft device, encrypted-memory, task-lease, and chat-routing API. The contract now has Worker handlers and basic route tests. It is still an evolving v0 API; full D1 integration/security tests and staging validation remain required.
 
 ## Intended resources
 
@@ -34,4 +34,4 @@ See `openapi.yaml` for the draft device, encrypted-memory, task-lease, and chat-
 
 ## Not yet implemented
 
-Worker request handlers, Access JWT/JWKS verification, account/device enrolment, device proof-of-possession, D1 repositories, R2 upload/download, Durable Object coordination, provider adapters, rate limiting, and deployment configuration still need code and tests. No production resource has been created.
+No Cloudflare resources have been provisioned. R2 attachment storage, Durable Object coordination, production-grade rate limiting/quotas, budget enforcement, full D1-backed integration tests, and deployment configuration remain outstanding. See worker/README.md for implementation and staging steps.

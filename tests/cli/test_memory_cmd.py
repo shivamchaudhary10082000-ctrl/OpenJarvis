@@ -262,3 +262,36 @@ def test_memory_clear_empty(tmp_path: Path, monkeypatch):
     result = CliRunner().invoke(cli, ["memory", "clear"])
     assert result.exit_code == 0
     assert "No memory facts to clear" in result.output
+
+
+def test_memory_list_distinguishes_pending_from_quarantined(tmp_path: Path, monkeypatch):
+    store = _patch_fact_store(monkeypatch, tmp_path)
+    store.add("candidate note", source="auto", trust="pending")
+
+    result = CliRunner().invoke(cli, ["memory", "list"])
+
+    assert result.exit_code == 0
+    assert "pending approval" in result.output.lower()
+    assert "quarantined" not in result.output.lower()
+
+
+def test_memory_approve_pending_fact(tmp_path: Path, monkeypatch):
+    store = _patch_fact_store(monkeypatch, tmp_path)
+    store.add("User prefers Roman Hinglish", source="auto", trust="pending")
+
+    result = CliRunner().invoke(cli, ["memory", "approve", "1"], input="y\n")
+
+    assert result.exit_code == 0
+    assert store.list()[0].trust == "trusted"
+    assert store.list()[0].trusted_for_recall is True
+
+
+def test_memory_reject_pending_fact(tmp_path: Path, monkeypatch):
+    store = _patch_fact_store(monkeypatch, tmp_path)
+    store.add("Candidate should not be remembered", source="auto", trust="pending")
+
+    result = CliRunner().invoke(cli, ["memory", "reject", "1"], input="y\n")
+
+    assert result.exit_code == 0
+    assert store.list()[0].trust == "untrusted"
+    assert store.list()[0].trusted_for_recall is False

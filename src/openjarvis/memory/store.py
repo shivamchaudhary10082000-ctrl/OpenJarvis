@@ -77,7 +77,8 @@ def _default_fact_path() -> Path:
 
 
 # Provenance tiers, recorded on every fact.
-TRUST_AUTO = "auto"  # auto-extracted and scanner-clean → recallable
+TRUST_AUTO = "auto"  # legacy auto-extracted facts; recallable for compatibility
+TRUST_PENDING = "pending"  # new facts awaiting explicit user approval
 TRUST_TRUSTED = "trusted"  # explicitly vouched for by the user
 TRUST_UNTRUSTED = "untrusted"  # scanner flagged the text → quarantined
 
@@ -138,9 +139,9 @@ class Fact:
     def trusted_for_recall(self) -> bool:
         """Whether this fact may be placed in model-facing context.
 
-        Only ``untrusted`` — the tier the memory service assigns when the
-        injection scanner flags a fact's own text — is withheld. Unknown
-        future tiers fail closed rather than silently becoming prompt input.
+        Only legacy blank, legacy auto, and explicitly trusted facts may be
+        placed in model-facing context. Pending, quarantined, and unknown
+        future tiers fail closed.
         """
         return (self.trust or "").strip().lower() in _RECALLABLE_TIERS
 
@@ -190,13 +191,13 @@ class FactStore(ABC):
             for text in texts
         )
 
-    def promote_reviewed(self, index: int, expected_text: str) -> bool:
-        """Promote the reviewed fact at *index* when it still matches.
+    def approve_pending(self, index: int, expected_text: str) -> bool:
+        """Approve a pending fact only when its text still matches."""
+        del index, expected_text
+        return False
 
-        The default preserves compatibility with third-party implementations;
-        stores with concurrent writers should override this with an atomic
-        identity check.
-        """
+    def promote_reviewed(self, index: int, expected_text: str) -> bool:
+        """Promote a scanner-quarantined fact after explicit review."""
         del expected_text
         return self.set_trust(index, TRUST_TRUSTED)
 
@@ -320,7 +321,11 @@ class LocalFactStore(FactStore):
                 # A later hostile derivation must be able to quarantine an
                 # older recallable copy. Never auto-promote in the opposite
                 # direction; promotion requires explicit human review.
-                if trust not in _RECALLABLE_TIERS and duplicate.trusted_for_recall:
+                if (
+                    trust != TRUST_PENDING
+                    and trust not in _RECALLABLE_TIERS
+                    and duplicate.trusted_for_recall
+                ):
                     duplicate.trust = trust or TRUST_UNTRUSTED
                     self._flush()
                 return False  # dedupe
@@ -351,14 +356,27 @@ class LocalFactStore(FactStore):
             self._flush()
         return True
 
-    def promote_reviewed(self, index: int, expected_text: str) -> bool:
-        """Atomically promote exactly the fact a user reviewed."""
+    def approve_pending(self, index: int, expected_text: str) -> bool:
+        """Atomically approve exactly the pending fact a user reviewed."""
         with self._lock, _cross_process_lock(self._lock_path()):
             self._sync_from_disk_locked()
             if not 0 <= index < len(self._facts):
                 return False
             fact = self._facts[index]
-            if fact.text != expected_text or fact.trusted_for_recall:
+            if fact.text != expected_text or fact.trust != TRUST_PENDING:
+                return False
+            fact.trust = TRUST_TRUSTED
+            self._flush()
+        return True
+
+    def promote_reviewed(self, index: int, expected_text: str) -> bool:
+        """Atomically promote only a scanner-quarantined reviewed fact."""
+        with self._lock, _cross_process_lock(self._lock_path()):
+            self._sync_from_disk_locked()
+            if not 0 <= index < len(self._facts):
+                return False
+            fact = self._facts[index]
+            if fact.text != expected_text or fact.trust != TRUST_UNTRUSTED:
                 return False
             fact.trust = TRUST_TRUSTED
             self._flush()
@@ -446,6 +464,7 @@ def load_configured_facts(config: Any) -> List[Fact]:
 __all__ = [
     "RECALLABLE_TRUST_TIERS",
     "TRUST_AUTO",
+    "TRUST_PENDING",
     "TRUST_TRUSTED",
     "TRUST_UNTRUSTED",
     "Fact",

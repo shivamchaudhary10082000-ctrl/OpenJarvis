@@ -89,6 +89,28 @@ async function route(req: Request, env: Env): Promise<Response> {
   const path = url.pathname.replace(/^\/v1/, "") || "/";
   if (req.method === "GET" && path === "/health") return json({ status: "ok", environment: env.NEO_ENV || "unset" });
   if (!path.startsWith("/")) return fail(404, "not_found", "Route not found");
+  // First enrolment uses Access identity and binds a client-generated P-256 key.
+  if (path === "/devices" && req.method === "POST") {
+    try {
+      const bearer = (req.headers.get("authorization") || "").replace(/^Bearer /, "");
+      if (!bearer) return fail(401, "unauthorized", "Missing Cloudflare Access bearer token");
+      const claims = await accessClaims(bearer, env);
+      const x = await bodyJson<any>(req, env);
+      const deviceId = req.headers.get("x-neo-device-id") || "";
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(deviceId) || typeof x.label !== "string" ||
+          x.label.length < 1 || x.label.length > 80 ||
+          !["android","ios","windows","macos","linux","browser","other"].includes(x.platform) ||
+          !x.public_key_jwk || x.public_key_jwk.kty !== "EC" || x.public_key_jwk.crv !== "P-256" ||
+          typeof x.public_key_jwk.x !== "string" || typeof x.public_key_jwk.y !== "string" ||
+          !Array.isArray(x.capabilities)) return fail(400, "invalid_device", "Invalid device registration");
+      await env.DB.prepare("INSERT OR IGNORE INTO accounts(account_id, created_at, status) VALUES(?, ?, 'active')").bind(claims.sub, now()).run();
+      await env.DB.prepare("INSERT INTO devices(device_id, account_id, label, platform, public_key_jwk, capabilities_json, created_at) VALUES(?,?,?,?,?,?,?)")
+        .bind(deviceId, claims.sub, x.label, x.platform, JSON.stringify(x.public_key_jwk), JSON.stringify(x.capabilities.slice(0,32)), now()).run();
+      await env.DB.prepare("INSERT INTO audit_events(event_id,account_id,device_id,event_type,created_at) VALUES(?,?,?,?,?)")
+        .bind(id(), claims.sub, deviceId, "device.enrolled", now()).run();
+      return json({ device_id: deviceId, account_id: claims.sub, status: "enrolled" }, 201);
+    } catch (e) { return fail(401, "enrolment_failed", e instanceof Error ? e.message : "Device enrolment failed"); }
+  }
   let auth: { account: string; device: Device };
   try { auth = await authenticate(req, env); } catch (e) {
     const message = e instanceof Error ? e.message : "Authentication failed";
@@ -119,7 +141,7 @@ async function route(req: Request, env: Env): Promise<Response> {
       const cursor = Number(url.searchParams.get("cursor") || 0);
       const includePending = url.searchParams.get("include_pending") === "true";
       const states = includePending ? ["approved","pending"] : ["approved"];
-      const rows = await env.DB.prepare("SELECT memory_id, revision, trust_state, payload_ciphertext, payload_nonce, key_version, source_device_id, source_kind, created_at, updated_at, tombstoned_at FROM memory_records WHERE account_id = ? AND updated_at > ? AND trust_state IN (?,?) ORDER BY updated_at, memory_id LIMIT 200").bind(account,cursor,states[0],states[1] || states[0]).all();
+      const rows = await env.DB.prepare("SELECT memory_id, revision, trust_state, payload_ciphertext, payload_nonce, key_version, source_device_id, source_kind, created_at, updated_at, tombstoned_at FROM memory_records WHERE account_id = ? AND updated_at > ? AND trust_state IN ('approved','deleted',?,?) ORDER BY updated_at, memory_id LIMIT 200").bind(account,cursor,states[0],states[1] || states[0]).all();
       const next = rows.results.length ? Math.max(...rows.results.map((r:any)=>Number(r.updated_at))) : null;
       return json({ records: rows.results, next_cursor: next });
     }
@@ -171,6 +193,7 @@ async function route(req: Request, env: Env): Promise<Response> {
       const x=await bodyJson<any>(req,env);
       const leaseSeconds=Math.min(300,Math.max(30,Number(x.lease_seconds)||90));
       const t=now();
+      await env.DB.prepare("UPDATE task_leases SET state='queued', assigned_device_id=NULL, lease_expires_at=NULL, updated_at=? WHERE account_id=? AND state IN ('leased','running') AND lease_expires_at IS NOT NULL AND lease_expires_at < ?").bind(t,account,t).run();
       const task=await env.DB.prepare("SELECT task_id,task_kind,payload_ciphertext,payload_nonce,key_version FROM task_leases WHERE account_id=? AND state='queued' ORDER BY created_at LIMIT 1").bind(account).first<any>();
       if (!task) return json({task:null});
       const updated=await env.DB.prepare("UPDATE task_leases SET state='leased',assigned_device_id=?,lease_expires_at=?,updated_at=? WHERE task_id=? AND state='queued'").bind(device.device_id,t+leaseSeconds,t,task.task_id).run();

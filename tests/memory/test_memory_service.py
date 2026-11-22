@@ -208,9 +208,9 @@ def test_flagged_fact_is_quarantined_but_clean_siblings_are_not(tmp_path):
     assert tiers[hostile] == "untrusted"
 
 
-def test_scanner_failure_fails_open(tmp_path):
-    # A scanner error must not block memory — the fact is still captured and
-    # still recallable, exactly as if no scanner were configured.
+def test_scanner_failure_keeps_facts_pending(tmp_path):
+    # A scanner error must not block candidate capture, but without a clean
+    # scan the candidate must remain unavailable for model recall.
     svc = _service(
         tmp_path,
         FakeExtractor(["a fact"]),

@@ -58,7 +58,6 @@ class NeoDeviceIdentity(private val alias: String = "neo-device-p256") {
     // Android's Signature emits ASN.1 DER; WebCrypto ECDSA verify expects r||s (32+32 bytes).
     private fun derToRawP256(der: ByteArray): ByteArray {
         var i = 2
-        if (der[1].toInt() and 0x80 != 0) i = 3
         if (der[i].toInt() != 0x02) throw IllegalArgumentException("Invalid ECDSA signature")
         val rLen = der[i + 1].toInt() and 0xff
         val r = der.copyOfRange(i + 2, i + 2 + rLen)

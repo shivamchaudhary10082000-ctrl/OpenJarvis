@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS task_leases (
   UNIQUE(account_id, idempotency_key),
   CHECK (
     (payload_ciphertext IS NULL AND payload_nonce IS NULL AND key_version IS NULL)
-    OR (payload_ciphertext IS NOT NULL AND payload_nonce IS NOT NULL AND key_version > 0)
+    OR (payload_ciphertext IS NOT NULL AND payload_nonce IS NOT NULL AND key_version IS NOT NULL AND key_version > 0)
   )
 );
 

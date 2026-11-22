@@ -1,0 +1,50 @@
+name: NEO memory safety tests
+
+on:
+  push:
+    branches:
+      - neo/foundation-architecture
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: neo-memory-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  memory-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+      - name: Install project and test dependencies
+        run: uv sync --extra dev --extra framework-comparison --extra server
+      - name: Run NEO memory safety tests
+        run: >-
+          uv run pytest
+          tests/memory/test_fact_extractor.py
+          tests/memory/test_fact_store.py
+          tests/memory/test_memory_service.py
+          -q --tb=short
+      - name: Lint changed memory code and tests
+        run: >-
+          uv run ruff check
+          src/openjarvis/memory/extractor.py
+          src/openjarvis/memory/store.py
+          src/openjarvis/memory/service.py
+          src/openjarvis/cli/memory_cmd.py
+          tests/memory/test_fact_extractor.py
+          tests/memory/test_fact_store.py
+          tests/memory/test_memory_service.py

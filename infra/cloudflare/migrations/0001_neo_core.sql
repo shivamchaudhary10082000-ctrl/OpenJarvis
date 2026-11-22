@@ -28,9 +28,9 @@ CREATE INDEX IF NOT EXISTS devices_by_account
   ON devices(account_id, revoked_at);
 
 CREATE TABLE IF NOT EXISTS memory_records (
-  memory_id TEXT PRIMARY KEY,
-  account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE CASCADE,
+  memory_id TEXT NOT NULL,
   revision INTEGER NOT NULL CHECK (revision > 0),
+  account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE CASCADE,
   trust_state TEXT NOT NULL
     CHECK (trust_state IN ('pending', 'approved', 'rejected', 'quarantined', 'deleted')),
   payload_ciphertext BLOB NOT NULL,
@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS memory_records (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   tombstoned_at INTEGER,
+  PRIMARY KEY (memory_id, revision),
   UNIQUE(account_id, memory_id, revision)
 );
 

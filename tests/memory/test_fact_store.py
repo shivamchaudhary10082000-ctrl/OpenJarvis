@@ -12,6 +12,7 @@ import pytest
 from openjarvis.core.registry import FactStoreRegistry
 from openjarvis.memory.store import (
     TRUST_AUTO,
+    TRUST_PENDING,
     TRUST_TRUSTED,
     TRUST_UNTRUSTED,
     LocalFactStore,
@@ -502,3 +503,51 @@ def test_load_configured_facts_skips_disabled_memory():
     config = SimpleNamespace(memory=SimpleNamespace(enabled=False))
 
     assert load_configured_facts(config) == []
+
+
+
+def test_pending_fact_is_not_recallable_and_requires_explicit_approval(tmp_path):
+    path = tmp_path / "pending.jsonl"
+    store = LocalFactStore(path)
+    assert store.add_with_trust("candidate fact", source="auto", trust=TRUST_PENDING)
+
+    fact = store.list()[0]
+    assert fact.trust == TRUST_PENDING
+    assert fact.trusted_for_recall is False
+    assert store.approve_pending(0, "wrong text") is False
+    assert store.list()[0].trusted_for_recall is False
+    assert store.approve_pending(0, "candidate fact") is True
+
+    approved = LocalFactStore(path).list()[0]
+    assert approved.trust == TRUST_TRUSTED
+    assert approved.trusted_for_recall is True
+
+
+def test_pending_fact_cannot_be_promoted_through_quarantine_path(tmp_path):
+    store = LocalFactStore(tmp_path / "pending.jsonl")
+    store.add_with_trust("candidate fact", trust=TRUST_PENDING)
+
+    assert store.promote_reviewed(0, "candidate fact") is False
+    assert store.set_trust(0, TRUST_TRUSTED) is False
+    assert store.list()[0].trust == TRUST_PENDING
+
+
+def test_reject_pending_keeps_fact_out_of_recall(tmp_path):
+    store = LocalFactStore(tmp_path / "pending.jsonl")
+    store.add_with_trust("candidate fact", trust=TRUST_PENDING)
+
+    assert store.reject_pending(0, "candidate fact") is True
+    fact = store.list()[0]
+    assert fact.trust == TRUST_UNTRUSTED
+    assert fact.trusted_for_recall is False
+    assert store.reject_pending(0, "candidate fact") is False
+
+
+def test_pending_duplicate_does_not_downgrade_approved_fact(tmp_path):
+    store = LocalFactStore(tmp_path / "pending.jsonl")
+    store.add_with_trust("same fact", trust=TRUST_TRUSTED)
+
+    assert store.add_with_trust("same fact", trust=TRUST_PENDING) is False
+    fact = store.list()[0]
+    assert fact.trust == TRUST_TRUSTED
+    assert fact.trusted_for_recall is True

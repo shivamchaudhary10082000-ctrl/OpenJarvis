@@ -482,7 +482,7 @@ async function modelRoute(req:Request,env:Env,account:string):Promise<Response>{
   const configuredOutput=positiveConfig(env.MAX_OUTPUT_TOKENS)||1024;
   const requestedOutput=x.max_completion_tokens ?? x.max_tokens ?? configuredOutput;
   if (!Number.isSafeInteger(requestedOutput) || requestedOutput<1 || requestedOutput>configuredOutput) return fail(400,"invalid_token_limit","Requested output tokens exceed the configured per-request maximum");
-  const promptBytes=enc.encode(JSON.stringify(x.messages)).byteLength;
+  const promptBytes=enc.encode(JSON.stringify(x)).byteLength;
   const maxPromptBytes=positiveConfig(env.MAX_PROMPT_BYTES)||128_000;
   if(promptBytes>maxPromptBytes)return fail(413,"prompt_too_large","Prompt exceeds the configured byte limit");
   if(candidates.some(p=>!p.inputRate||!p.outputRate))return fail(503,"spend_pricing_unconfigured","Every eligible provider must have positive, reviewed input and output pricing before use");
@@ -500,8 +500,13 @@ async function modelRoute(req:Request,env:Env,account:string):Promise<Response>{
     const {provider:p,maximum}=reservations[i];
     try{
       const started=Date.now();
-      const forwarded={...x,model:p.name,stream:false,max_tokens:requestedOutput};
-      delete (forwarded as Record<string,unknown>).max_completion_tokens;
+      const forwarded:Record<string,unknown>={...x,model:p.name,stream:false};
+      if(Object.prototype.hasOwnProperty.call(x,"max_completion_tokens")){
+        forwarded.max_completion_tokens=requestedOutput;
+        delete forwarded.max_tokens;
+      }else{
+        forwarded.max_tokens=requestedOutput;
+      }
       const response=await fetch(p.url!.replace(/\/$/,"")+"/chat/completions",{method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+p.key!},body:JSON.stringify(forwarded),signal:AbortSignal.timeout(60_000)});
       if(!response.ok){
         attemptedSpend+=maximum;

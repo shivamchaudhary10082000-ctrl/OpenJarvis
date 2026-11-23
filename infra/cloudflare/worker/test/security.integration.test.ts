@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "cloudflare:workers";
-import worker, { cleanupExpiredDeviceNonces, type Env } from "../src/index";
+import worker, { cleanupExpiredDeviceNonces, reconcileStaleProviderSpendReservations, type Env } from "../src/index";
 import { createDeviceIdentity, selectRecallableMemory } from "../../clients/web/neo-client";
 
 const encoder = new TextEncoder();

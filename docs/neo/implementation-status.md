@@ -30,8 +30,8 @@ This report separates source implementation from tested behavior and from produc
 
 Latest NEO Worker run at the time of this report:
 
-- Workflow run #91: **Success**
-- Tested commit: 77c72cb949b9695d9d9f876dd8d224429a7e9d62
+- Workflow run #93: **Success**
+- Tested commit: 5ddb9f6f81b88475030cdefab32f9291247f8b61
 - npm install --ignore-scripts: passed; npm reported 0 vulnerabilities.
 - npm run check: passed.
 - npm test: passed.

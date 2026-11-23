@@ -2,6 +2,7 @@ export type DevicePlatform = "android" | "ios" | "windows" | "macos" | "linux" |
 type StoredIdentity = { deviceId:string; privateKey:CryptoKey; publicJwk:JsonWebKey };
 type OutboxItem = {
   id:string;
+  scopeKey:string;
   kind:"memory.create"|"task.enqueue";
   path:string;
   method:"POST";
@@ -36,26 +37,26 @@ function transactionDone(tx:IDBTransaction):Promise<void>{
     tx.oncomplete=()=>resolve(); tx.onerror=()=>reject(tx.error); tx.onabort=()=>reject(tx.error||new Error("IndexedDB transaction aborted"));
   });
 }
-async function loadIdentity():Promise<StoredIdentity|null>{
+async function loadIdentity(scopeKey:string):Promise<StoredIdentity|null>{
   const db=await openDb();
   try{return await new Promise((resolve,reject)=>{
-    const r=db.transaction("identity","readonly").objectStore("identity").get("current");
+    const r=db.transaction("identity","readonly").objectStore("identity").get("current:"+scopeKey);
     r.onsuccess=()=>resolve(r.result||null); r.onerror=()=>reject(r.error);
   });}finally{db.close();}
 }
-async function saveIdentity(value:StoredIdentity):Promise<void>{
+async function saveIdentity(value:StoredIdentity,scopeKey:string):Promise<void>{
   const db=await openDb();
-  try{const tx=db.transaction("identity","readwrite");tx.objectStore("identity").put(value,"current");await transactionDone(tx);}finally{db.close();}
+  try{const tx=db.transaction("identity","readwrite");tx.objectStore("identity").put(value,"current:"+scopeKey);await transactionDone(tx);}finally{db.close();}
 }
 async function enqueueOutbox(item:OutboxItem):Promise<void>{
   const db=await openDb();
   try{const tx=db.transaction("outbox","readwrite");tx.objectStore("outbox").put(item);await transactionDone(tx);}finally{db.close();}
 }
-async function readOutbox():Promise<OutboxItem[]>{
+async function readOutbox(scopeKey:string):Promise<OutboxItem[]>{
   const db=await openDb();
   try{return await new Promise((resolve,reject)=>{
     const r=db.transaction("outbox","readonly").objectStore("outbox").getAll();
-    r.onsuccess=()=>resolve((r.result as OutboxItem[]).sort((a,b)=>a.createdAt-b.createdAt));
+    r.onsuccess=()=>resolve((r.result as OutboxItem[]).filter(item=>item.scopeKey===scopeKey).sort((a,b)=>a.createdAt-b.createdAt));
     r.onerror=()=>reject(r.error);
   });}finally{db.close();}
 }
@@ -113,15 +114,17 @@ export async function createDeviceIdentity():Promise<StoredIdentity>{
 }
 
 export class NeoDeviceClient {
-  private constructor(private baseUrl:string,private accessToken:()=>Promise<string>,private identity:StoredIdentity){}
-  static async create(baseUrl:string,accessToken:()=>Promise<string>){
-    let identity=await loadIdentity();
+  private constructor(private baseUrl:string,private accessToken:()=>Promise<string>,private identity:StoredIdentity,private scopeKey:string){}
+  static async create(baseUrl:string,accessToken:()=>Promise<string>,accountScope:string){
+    if(!accountScope.trim())throw new Error("A stable account scope is required for local device storage");
+    const scopeKey=toB64u(await sha256(enc.encode(accountScope)));
+    let identity=await loadIdentity(scopeKey);
     if(identity?.privateKey.extractable)identity=null;
     if(!identity){
       identity=await createDeviceIdentity();
-      await saveIdentity(identity);
+      await saveIdentity(identity,scopeKey);
     }
-    return new NeoDeviceClient(baseUrl.endsWith("/") ? baseUrl.slice(0,-1) : baseUrl,accessToken,identity);
+    return new NeoDeviceClient(baseUrl.endsWith("/") ? baseUrl.slice(0,-1) : baseUrl,accessToken,identity,scopeKey);
   }
   get deviceId(){return this.identity.deviceId;}
   async enrol(label:string,platform:DevicePlatform,capabilities:string[]=[]){
@@ -146,7 +149,7 @@ export class NeoDeviceClient {
   }
   private async enqueue(kind:OutboxItem["kind"],path:string,body:string,idempotencyKey:string){
     const item:OutboxItem={
-      id:randomId(),kind,path,method:"POST",
+      id:randomId(),scopeKey:this.scopeKey,kind,path,method:"POST",
       headers:{"content-type":"application/json","idempotency-key":idempotencyKey},
       body,createdAt:Date.now(),attempts:0,
     };
@@ -197,7 +200,7 @@ export class NeoDeviceClient {
     return response.json();
   }
   async flushOutbox(){
-    const items=await readOutbox();
+    const items=await readOutbox(this.scopeKey);
     let sent=0,blockedOn:string|null=null;
     for(const item of items){
       let response:Response;
@@ -209,7 +212,7 @@ export class NeoDeviceClient {
       }
       blockedOn=item.id;break;
     }
-    return {sent,remaining:(await readOutbox()).length,blocked_on:blockedOn};
+    return {sent,remaining:(await readOutbox(this.scopeKey)).length,blocked_on:blockedOn};
   }
   async heartbeat(){
     const r=await this.request("/devices/heartbeat",{method:"POST",body:"{}"});

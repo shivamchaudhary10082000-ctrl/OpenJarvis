@@ -257,6 +257,11 @@ async function route(req: Request, env: Env): Promise<Response> {
           typeof x.public_key_jwk.x !== "string" || typeof x.public_key_jwk.y !== "string" ||
           !isValidCapabilityList(x.capabilities)) return fail(400, "invalid_device", "Invalid device registration");
       await env.DB.prepare("INSERT OR IGNORE INTO accounts(account_id, created_at, status) VALUES(?, ?, 'active')").bind(claims.sub, now()).run();
+      const accountRow = await env.DB.prepare("SELECT status FROM accounts WHERE account_id = ?")
+        .bind(claims.sub).first<{ status: string }>();
+      if (!accountRow || accountRow.status !== "active") {
+        return fail(403, "account_inactive", "Account is not active");
+      }
       await enforceAccountRateLimit(claims.sub, env);
       await env.DB.prepare("INSERT INTO devices(device_id, account_id, label, platform, public_key_jwk, capabilities_json, created_at) VALUES(?,?,?,?,?,?,?)")
         .bind(deviceId, claims.sub, x.label, x.platform, JSON.stringify(x.public_key_jwk), JSON.stringify(x.capabilities.slice(0,32)), now()).run();

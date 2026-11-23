@@ -92,7 +92,7 @@ async function enrolDevice(
       capabilities,
     }),
   }), bindings);
-  expect(response.status).toBe(201);
+  if (response.status !== 201) throw new Error("Device enrolment failed (" + response.status + "): " + await response.text());
   return { id, account, token, privateKey: pair.privateKey };
 }
 

@@ -228,6 +228,30 @@ describe("D1-backed Access and device proof", () => {
     expect(body.devices.map(item => item.device_id)).toEqual([first.id]);
   });
 
+  it("reports device presence and refreshes it with an authenticated heartbeat", async () => {
+    const account = "presence-" + crypto.randomUUID();
+    const owner = await enrolDevice(account, "Owner device");
+    const secondary = await enrolDevice(account, "Secondary device");
+    await bindings.DB.prepare("UPDATE devices SET last_seen_at = 0 WHERE device_id = ?")
+      .bind(secondary.id).run();
+
+    const offlineList = await call(owner, "/v1/devices");
+    const offlineBody = await offlineList.json() as { devices: Array<{ device_id: string; presence: string }> };
+    expect(offlineBody.devices.find(device => device.device_id === secondary.id)?.presence).toBe("offline");
+
+    const heartbeat = await call(secondary, "/v1/devices/heartbeat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(heartbeat.status).toBe(200);
+    expect(await heartbeat.json()).toMatchObject({ device_id: secondary.id, status: "active" });
+
+    const onlineList = await call(owner, "/v1/devices");
+    const onlineBody = await onlineList.json() as { devices: Array<{ device_id: string; presence: string }> };
+    expect(onlineBody.devices.find(device => device.device_id === secondary.id)?.presence).toBe("online");
+  });
+
   it("revokes a second device and rejects all later requests from it", async () => {
     const account = "revocation-" + crypto.randomUUID();
     const owner = await enrolDevice(account, "Owner device");

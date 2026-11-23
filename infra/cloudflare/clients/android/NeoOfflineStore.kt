@@ -155,9 +155,18 @@ class NeoOfflineStore(context: Context, accountScope: String) :
 
     fun cachedApprovedMemory(): JSONArray {
         val result = JSONArray()
-        readableDatabase.query(
-            "neo_memory_cache", arrayOf("record_ciphertext_json"),
-            "trust_state IN ('approved','deleted')", null, null, null, "updated_at ASC"
+        readableDatabase.rawQuery(
+            """SELECT current.record_ciphertext_json
+               FROM neo_memory_cache current
+               WHERE current.trust_state = 'approved'
+                 AND current.revision = (
+                   SELECT MAX(history.revision)
+                   FROM neo_memory_cache history
+                   WHERE history.memory_id = current.memory_id
+                     AND history.trust_state IN ('approved', 'deleted')
+                 )
+               ORDER BY current.updated_at ASC""".trimIndent(),
+            null
         ).use { cursor ->
             while (cursor.moveToNext()) result.put(JSONObject(cursor.getString(0)))
         }

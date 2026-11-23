@@ -539,13 +539,15 @@ components:
       allOf:
         - $ref: "#/components/schemas/EncryptedMemoryInput"
         - type: object
-          required: [revision, trust_state, updated_at]
+          required: [revision, trust_state, created_at, updated_at]
           properties:
             revision:
               type: integer
               minimum: 1
             trust_state:
               enum: [pending, approved, rejected, quarantined, deleted]
+            created_at:
+              type: integer
             updated_at:
               type: integer
             tombstoned_at:
@@ -567,6 +569,10 @@ components:
         lease_expires_at:
           type: integer
           nullable: true
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
     Conflict:
       description: Revision conflict or idempotency key reused with a different payload.
       content:

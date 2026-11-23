@@ -9,7 +9,8 @@
       "WebWorker"
     ],
     "types": [
-      "@cloudflare/workers-types"
+      "@cloudflare/workers-types",
+      "@cloudflare/vitest-plugin/types"
     ],
     "noEmit": true,
     "skipLibCheck": true
@@ -17,6 +18,7 @@
   "include": [
     "src/**/*.ts",
     "test/**/*.ts",
-    "../clients/web/**/*.ts"
+    "../clients/web/**/*.ts",
+    "vitest.config.ts"
   ]
 }

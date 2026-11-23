@@ -2,7 +2,6 @@
   "name": "neo-cloudflare-worker",
   "private": true,
   "version": "0.1.0",
-  "type": "module",
   "scripts": {
     "check": "tsc --noEmit",
     "test": "vitest run",
@@ -10,6 +9,7 @@
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.0.0",
     "@cloudflare/workers-types": "^5.20261121.1",
     "typescript": "^5.9.3",
     "vitest": "^5.1.1",

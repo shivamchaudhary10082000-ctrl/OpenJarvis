@@ -1,88 +1,62 @@
 # NEO implementation status
 
-**As of:** 2026-11-23  
-**Working branch:** neo/foundation-architecture  
-**Pull request:** #1 — Draft, open, not merged  
-**Deployment:** Not deployed. No Cloudflare resources, provider credentials, paid inference, DNS, or real devices have been activated.
+**As of:** 2026-11-24  
+**Working branch:** `neo/foundation-architecture`  
+**Pull request:** [#1 — Draft, open, not merged](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/pull/1)  
+**Inspected PR head:** `558e547ab888d93fb88cca8cdcf63bd211320229` (the browser-token regression/doc commit that follows this snapshot must be re-verified by its own CI).  
+**Deployment:** No Cloudflare resources, provider credentials, paid inference, DNS, or production systems have been activated.
 
-This report separates source implementation from tested behavior and from production readiness.
+This report distinguishes source implementation, CI evidence and release readiness.
 
 ## Implemented in source
 
-| Area | State | What exists |
+| Area | State | Evidence / boundary |
 |---|---|---|
-| Architecture | Documented | One account identity across authorised devices; cloud-first coordination; devices are clients/optional workers, not the permanent brain. |
-| Memory trust model | Implemented in OpenJarvis | User-authored evidence, pending-by-default candidates, explicit approval/rejection, quarantine handling, and CLI flows. |
-| Access and device security | Implemented | Access JWT RS256 signature, issuer, audience and expiry validation; P-256 device proof; timestamp window; nonce replay protection; device enrolment, listing, heartbeat, presence and revocation. |
-| D1 schema | Eight ordered migrations | Account/device/memory/task/audit data; nonce records; task capabilities; API rate limits; monthly spend ledger; settlement guards; idempotency for memory/task writes; monthly input/output token budgets. |
-| Encrypted memory API | Implemented | Client-encrypted immutable revisions, pending-by-default writes, approval into a new revision, tombstones, base64url wire serialization and opaque rowid sync cursor. |
-| Offline replay safety | Implemented | Idempotency keys and request hashes for memory writes and task enqueue. Reusing a key with different content returns 409. |
-| Task delegation | Implemented | Capability-aware claims, expiring leases, concurrent-claim protection, and lease expiry recovery when another device claims. |
-| Device coordination | Implemented | Authenticated heartbeat and online/offline freshness indicator (90-second window); any authenticated request also refreshes last-seen time. Expired device nonces are removed by a 15-minute scheduled Worker cleanup. |
-| Provider spend controls | Implemented, fail-closed | Per-account monthly USD-micro cap; per-provider input/output pricing; prompt byte and per-request output-token ceilings; monthly input/output token caps; atomic D1 reservations and settlement triggers. |
-| Voice spend controls | Implemented, fail-closed | Voice transcription/synthesis require a reviewed maximum per-request cost and share the monthly spend cap. |
-| Model routing | Implemented | Primary/backup routing, explicit model no-fallback behavior, auto, allow_fallback=false, and provider/tier/fallback metadata. |
-| Web client | Source implemented; Worker CI tested with fake IndexedDB | Per-account non-exportable P-256 key in IndexedDB; account-scoped encrypted memory cache; durable ciphertext-only outbox; idempotent replay; manual flush; heartbeat; task and voice transport. Automated persistence/reconstruction/replay tests pass using fake IndexedDB; native browser matrix remains outstanding. |
-| Android client | Starter source implemented; not built on Android CI | Per-account Android Keystore P-256 identity; account-scoped SQLite ciphertext-only cache/outbox; idempotent replay; heartbeat; signed requests and voice transport. Fixed outbox success counter; no Gradle harness or physical-device run exists. |
-| API contract | Draft OpenAPI 3.1 | Device, memory, task, chat and voice routes; Redocly lint passes in CI. |
+| Cloud-first architecture | Documented | Account identity is independent of devices; no device is a permanent brain. |
+| Worker authentication | Implemented locally | RS256 Access JWT signature, issuer, audience and expiry validation; account/device binding; P-256 request proof; timestamp and nonce replay protection. |
+| Device lifecycle | Implemented locally | First enrolment, listing, heartbeat/presence and per-device revocation. No bulk account recovery endpoint. |
+| D1 schema | Eight ordered migrations | Accounts, devices, encrypted memory revisions, task leases, audit, nonce cleanup, capabilities, rate limits, spend/token budgets and idempotency. |
+| Memory trust | Implemented locally | Client-encrypted immutable revisions; pending by default; explicit approval, tombstones and cursor-based sync. |
+| Task delegation | Implemented locally | Capability-aware claims, expiring leases, concurrency protection and expired-lease recovery. |
+| Spend/token controls | Implemented, fail-closed | Monthly per-account USD-micro and input/output token budgets; per-provider price ceilings; voice per-request ceilings. All non-test budgets/prices remain zero. |
+| Reservation recovery | Implemented locally | Scheduled Worker reconciles reservations older than 30 minutes at their full reserved cost/token ceiling rather than releasing possibly billed requests. Abnormal over-reservation still needs operator investigation. |
+| Web transport | Source implemented | Account-scoped IndexedDB; non-exportable P-256 private CryptoKey; ciphertext-only cache/outbox; idempotent replay; caller-driven flush; heartbeat/task/voice transport. |
+| Native browser storage | CI passed on inspected head | Playwright native IndexedDB matrix passed 9/9 in Chromium, Firefox and WebKit. This is not a live-host authentication/CSP test. |
+| Browser token callback | Source contract plus new regression test | Existing client calls the host callback for enrolment and each request; new test asserts per-request token refresh and no IndexedDB persistence. The new test is pending CI on the commit containing it. |
+| Android transport | Source plus Gradle harness | Android unit/Robolectric job passed on the inspected head. Emulator Keystore instrumentation was still running; no physical-device pass is claimed. |
+| Hosting/auth design | Documented, not integrated | See [browser-auth-hosting-decision.md](browser-auth-hosting-decision.md). No NEO browser host, identity SDK, Access app, route, CORS allowlist or CSP response header exists yet. |
+| OpenAPI / Worker | CI passed | Redocly lint, TypeScript, Wrangler dry-run, Vitest and native Playwright browser suite. |
+| Independent security review | Not performed | Internal tests and source review are not a third-party penetration test. |
 
-## Verification evidence
+## CI evidence on inspected head 558e547
 
-Latest NEO Worker run:
-- Workflow run #106: **Success**
-- Tested commit: `9e2d2fd4783cfc77c3cdc3cea9e3eed664e71922`
-- npm install: passed.
-- Redocly OpenAPI lint: passed.
-- TypeScript check: passed.
-- Wrangler deploy dry-run: passed.
-- Vitest: **3 test files, 48 tests passed** (17 unit/route tests, 28 D1-backed integration tests, 3 browser-storage tests).
+- [CI #45248520038 — Success](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45248520038): Python 3.12 **10,037 passed / 72 skipped**, 67.75% coverage; Python 3.11 **10,037 passed / 72 skipped**, 67.73% coverage; Windows 3.12/3.13, Rust workspace, lint, Bandit, Semgrep, Python dependency audit and both Rust advisory jobs passed.
+- [NEO Cloudflare Worker #45248519722 — Success](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45248519722): OpenAPI lint, TypeScript check, Wrangler dry-run, **50 Vitest tests passed**, and Playwright **9/9 passed** across Chromium, Firefox and WebKit.
+- [Frontend CI #45248519507 — Success](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45248519507).
+- [NEO memory safety #45248519763 — Success](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45248519763).
+- [Docker validation #45248519605 — Success](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45248519605).
+- [Documentation build #45248519583 — Success](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45248519583).
+- [Android harness #45248520351 — In progress at inspection](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45248520351): unit job passed; emulator boot/instrumentation not complete.
+- [Desktop Build & Release #45248519897 — In progress at inspection](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45248519897): validation passed; Windows ARM64 test-installer build was still running; release/publish jobs were skipped.
+- [Installer integration #45248519712 — Queued at inspection](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45248519712): Fedora 40 and Ubuntu 22.04/24.04 passed; macOS 15 and macOS 15 Intel jobs remained queued.
 
-New coverage:
-- Browser IndexedDB identity reconstruction, account-scope isolation, encrypted cache recovery after simulated offline restart, and durable ciphertext outbox replay.
-- Heartbeat expiry after the 90-second freshness window and recovery to online after a new heartbeat.
-- Voice upstream timeout accounting: maximum request reservation settled once; no blind retry of a billable audio upload.
-- Android outbox replay success counter corrected.
+No completed workflow on inspected head 558e547 reported a failure. The three unfinished workflow groups above must not be represented as passed. Older cancelled runs belong to superseded commits and are not evidence of a current failure.
 
-Important qualification: browser persistence tests use fake IndexedDB with a test-only CryptoKey structured-clone adapter because Node's WebCrypto CryptoKey is not cloneable in that test runtime. This is not a real Chrome/Firefox/Safari test. Android code has not been compiled or exercised on physical devices.
+## Financial operating rule
 
-These tests run against Cloudflare's local Workers runtime and SQLite-backed D1 simulation. They are not remote D1 staging tests or a production penetration test.
+Non-test Wrangler spend, input/output token budgets, provider prices and voice request ceilings remain zero. Chat and voice therefore remain blocked until provider/model selection, current pricing review and explicit owner-approved limits. Stale reservations are conservatively settled by the scheduled reconciler; an anomalous settlement above its reservation remains held for operator review. Budget alerts, pricing-drift monitoring and a global shared-provider-key ceiling are not implemented.
 
-## Financial controls — important operating rule
+## Remaining Phase 1 gates
 
-The non-test Wrangler defaults are deliberately set to zero for:
-- MAX_MONTHLY_SPEND_USD_MICROS
-- MAX_MONTHLY_INPUT_TOKENS
-- MAX_MONTHLY_OUTPUT_TOKENS
-- all primary/backup input/output model prices
-- voice transcription/synthesis maximum per-request costs
-
-Therefore **chat and voice inference remain blocked** until a provider/model is selected, current provider pricing is independently checked, and the owner explicitly sets a monthly USD spend cap, input-token cap, output-token cap, and voice per-request ceilings. No provider secrets have been added.
-
-Input-token reservation uses serialized request bytes as a conservative upper bound; output tokens are bounded by the server maximum. Every possible provider candidate is reserved before a request. Failed attempts are charged their full reservation; missing usage data is charged conservatively at the reservation. A settlement above the reservation is rejected and leaves the reservation held, intentionally blocking additional inference until an operator reconciles it. Automated reservation-reconciliation tooling is not yet implemented.
-
-## Remaining blockers
-
-1. **Staging and operational validation:** A fail-closed disposable Wrangler template and staging/rollback/restore runbook are prepared. No Cloudflare resources have been provisioned; remote D1 migration rehearsal, staging deployment, rollback, restore and deletion tests remain.
-2. **Real provider compatibility:** All provider/voice integration tests use mocks. Test real provider error formats, timeouts, malformed/missing usage, voice duration pricing and backup independence after credentials and budget are approved.
-3. **Budget operations:** Pricing is manually configured and can drift. Add a documented pricing review/update process, budget dashboard/alerts, reservation reconciliation and operator audit trail. Current caps are per account, not a global shared-provider-key ceiling.
-4. **Offline behavior:** Web IndexedDB persistence/reconstruction/outbox tests pass under fake IndexedDB; native browser testing remains. Android SQLite remains uncompiled and untested on physical devices; a manual two-device/offline/reboot/replay test plan is documented. Server-side revocation cannot remotely wipe a disconnected device or revoke its local memory-decryption key. Outbox flush is caller-driven; no automatic background scheduler/backoff exists.
-5. **Local inference fallback:** Not implemented. Offline mode currently provides encrypted cached memory and queued writes/tasks, not an equivalent local AI model.
-6. **Browser security:** Hosting CSP is not deployed. A report-only-to-enforce CSP, Trusted Types, XSS, dependency, token lifecycle and recovery review plan is documented; actual frontend origin/headers and token callback must be inspected before enforcement.
-7. **Native app integration:** Android code is a transport/storage primitive, not a built application. No Gradle app/test project, Access login UI, microphone permission UX, background worker or real-device test exists. iOS and desktop integrations are absent.
-8. **Storage/coordination expansion:** R2 encrypted attachments/exports/snapshots and Durable Object coordination are not implemented or provisioned.
-9. **Independent security review:** Source-level checks are not a third-party penetration test or security certification.
-10. **Desktop Rust dependency audit:** Current CI fails on `cookie 0.18.1` in `frontend/src-tauri/Cargo.lock` (RUSTSEC-2026-0594). The advisory documents a specific fork/thread condition; applicability to the Tauri process model needs review, but dependency upgrade to patched `cookie 0.18.3` and full re-verification are required. Do not ignore/suppress without documented justification.\n11. **Language quality gate:** Run the Hindi/Hinglish evaluation set across candidate models, blind-score outputs, and select no primary model until quality and cost gates pass.
+1. **Browser auth/hosting:** owner chooses the actual host/domain, identity-provider flow and same-origin versus explicit CORS topology. The browser design is documented, but no sign-in/refresh/sign-out integration or real host headers exist. Do not enforce CSP before collecting report-only evidence from the actual host.
+2. **CI completion:** Android emulator instrumentation, Windows ARM64 test-installer build and macOS installer jobs were unfinished at the last inspection. Recheck these runs and fix only verified failures.
+3. **Physical Android:** after emulator CI, test offline/reboot/replay/revocation on actual Pixel/Samsung hardware with the owner. Emulator success is not physical-device evidence.
+4. **Cloudflare staging:** owner authorization required. Create disposable Access + D1 only; apply migrations 0001–0008; test auth/device/memory/task/spend-disabled flows; rehearse Worker rollback and D1 backup/restore.
+5. **Provider operations:** real provider/voice tests, reviewed pricing, low hard caps, alerts and operator reconciliation workflow after provider selection and approval.
+6. **Offline recovery:** caller-driven outbox has no automatic background scheduler/backoff; local inference fallback is not implemented; lost device storage/key recovery needs an explicit policy.
+7. **Independent assessment:** third-party penetration test and remediation.
+8. **Language quality:** blind Hindi/Hinglish evaluation before choosing a primary model.
 
 ## Release decision
 
-Keep PR #1 as **Draft**. Do not merge or deploy yet. The Worker foundation now has meaningful local D1 security/concurrency coverage and fail-closed spend/token controls, but staging, real provider testing, Android device validation, browser hardening, recovery operations and independent security review remain release blockers.
-
-
-## 2026-11-24 validation expansion (CI pending)
-
-- Desktop lockfile now pins `cookie 0.18.3` with the checksum from the crates.io index; the next repository security workflow must confirm the advisory gate is clean and the desktop build remains compatible.
-- Added `infra/cloudflare/clients/android-test-harness`: Gradle app harness, Robolectric SQLite/outbox/account-isolation tests, and Android emulator Keystore identity persistence test. CI has been added; this is not yet evidence of a physical handset pass.
-- Added Playwright native-browser persistence tests for Chromium, Firefox and WebKit. They exercise the real web client in browser contexts and test CryptoKey IndexedDB persistence, cache recovery and encrypted outbox replay after reload. CI has been added; browser results are pending.
-- No remote Cloudflare resources were provisioned. Remote D1 migrations, export, rollback, restore and cleanup remain blocked on an authorised disposable Cloudflare account and owner-controlled credentials.
-- No independent penetration test was performed. A third-party tester must execute and report the assessment; internal CI is not a substitute.
-
+Keep PR #1 **Draft**. Do not merge, change `main`, deploy production, add paid provider credentials or provision Cloudflare without the owner's participation. Phase 1 remains **OPEN**.

@@ -201,6 +201,30 @@ describe("D1-backed Access and device proof", () => {
     expect(signatureResponse.status).toBe(401);
   });
 
+  it("accepts the Cloudflare Access injected browser assertion with the same JWT validation", async () => {
+    const device = await enrolDevice("access-assertion-" + crypto.randomUUID(), "Browser assertion device");
+    const bearerRequest = await signedRequest(device, "/v1/devices");
+    const assertionHeaders = new Headers(bearerRequest.headers);
+    assertionHeaders.delete("authorization");
+    assertionHeaders.set("cf-access-jwt-assertion", device.token);
+    const assertionRequest = new Request(bearerRequest.url, {
+      method: bearerRequest.method,
+      headers: assertionHeaders,
+    });
+    expect((await worker.fetch(assertionRequest, bindings)).status).toBe(200);
+
+    // A present but invalid Access assertion must not silently fall back to a
+    // valid bearer token; this preserves the selected browser auth boundary.
+    const invalidBearerRequest = await signedRequest(device, "/v1/devices");
+    const invalidAssertionHeaders = new Headers(invalidBearerRequest.headers);
+    invalidAssertionHeaders.set("cf-access-jwt-assertion", "invalid.assertion.value");
+    const invalidAssertionRequest = new Request(invalidBearerRequest.url, {
+      method: invalidBearerRequest.method,
+      headers: invalidAssertionHeaders,
+    });
+    expect((await worker.fetch(invalidAssertionRequest, bindings)).status).toBe(401);
+  });
+
   it("rejects first-time device enrolment for a suspended account", async () => {
     const account = "suspended-enrolment-" + crypto.randomUUID();
     await bindings.DB.prepare(

@@ -92,13 +92,13 @@ class NeoAndroidClient(
     }
 
     suspend fun syncApprovedMemory(cursor: String? = null): JSONObject {
-        val activeCursor = cursor ?: offlineStore.loadCursor()
+        val activeCursor = cursor ?: withContext(Dispatchers.IO) { offlineStore.loadCursor() }
         val query = activeCursor?.let { "?cursor=" + java.net.URLEncoder.encode(it, "UTF-8") } ?: ""
         val response = try {
             signedRequest("GET", "/memory$query")
         } catch (error: IOException) {
             return JSONObject()
-                .put("records", offlineStore.cachedApprovedMemory())
+                .put("records", withContext(Dispatchers.IO) { offlineStore.cachedApprovedMemory() })
                 .put("next_cursor", activeCursor)
                 .put("offline", true)
         }

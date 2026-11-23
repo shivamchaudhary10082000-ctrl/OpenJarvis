@@ -201,6 +201,45 @@ describe("D1-backed Access and device proof", () => {
     expect(signatureResponse.status).toBe(401);
   });
 
+  it("rejects first-time device enrolment for a suspended account", async () => {
+    const account = "suspended-enrolment-" + crypto.randomUUID();
+    await bindings.DB.prepare(
+      "INSERT INTO accounts(account_id, created_at, status) VALUES(?, ?, 'suspended')",
+    ).bind(account, Math.floor(Date.now() / 1000)).run();
+
+    const pair = await crypto.subtle.generateKey(
+      { name: "ECDSA", namedCurve: "P-256" },
+      true,
+      ["sign", "verify"],
+    );
+    const publicJwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
+    const deviceId = crypto.randomUUID().replace(/-/g, "");
+    const token = await accessToken(account);
+    const response = await worker.fetch(new Request(baseUrl + "/v1/devices", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer " + token,
+        "content-type": "application/json",
+        "x-neo-device-id": deviceId,
+      },
+      body: JSON.stringify({
+        label: "Suspended account device",
+        platform: "browser",
+        public_key_jwk: publicJwk,
+        capabilities: ["cpu"],
+      }),
+    }), bindings);
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: { code: "account_inactive" },
+    });
+    const stored = await bindings.DB.prepare(
+      "SELECT COUNT(*) AS count FROM devices WHERE device_id = ?",
+    ).bind(deviceId).first<{ count: number }>();
+    expect(stored?.count).toBe(0);
+  });
+
   it("accepts a valid device proof once and rejects a replayed nonce", async () => {
     const device = await enrolDevice("proof-" + crypto.randomUUID(), "Proof device");
     const request = await signedRequest(device, "/v1/devices");

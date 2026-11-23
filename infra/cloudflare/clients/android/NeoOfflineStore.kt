@@ -27,6 +27,7 @@ internal fun neoAccountScopeHash(scope: String): String {
     return MessageDigest.getInstance("SHA-256")
         .digest(scope.toByteArray(Charsets.UTF_8))
         .take(12)
+        .map { it.toInt() and 0xff }
         .joinToString("") { "%02x".format(it) }
 }
 

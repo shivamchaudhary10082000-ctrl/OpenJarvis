@@ -184,9 +184,16 @@ async function accessClaims(token: string, env: Env): Promise<Claims> {
   return claims;
 }
 async function authenticate(req: Request, env: Env): Promise<{ account: string; device: Device }> {
+  // Cloudflare Access injects this signed assertion after authenticating browser
+  // sessions. Native/controlled clients may continue to use the bearer contract.
+  // Both paths go through the same signature, issuer, audience and expiry checks.
+  const accessAssertion = req.headers.get("cf-access-jwt-assertion");
   const authorization = req.headers.get("authorization") || "";
-  if (!authorization.startsWith("Bearer ")) throw new Error("Missing Cloudflare Access bearer token");
-  const claims = await accessClaims(authorization.slice(7), env);
+  const token = accessAssertion !== null
+    ? accessAssertion.trim()
+    : authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+  if (!token) throw new Error("Missing Cloudflare Access token");
+  const claims = await accessClaims(token, env);
   const account = claims.sub;
   await env.DB.prepare("INSERT OR IGNORE INTO accounts(account_id, created_at, status) VALUES(?, ?, 'active')").bind(account, now()).run();
   const accountRow = await env.DB.prepare("SELECT status FROM accounts WHERE account_id = ?").bind(account).first<{status:string}>();

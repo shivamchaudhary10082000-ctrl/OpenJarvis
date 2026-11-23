@@ -1,0 +1,38 @@
+# Disposable NEO staging template.
+# This file intentionally contains placeholders and zero spend ceilings.
+# Do not deploy until a dedicated D1 database and Cloudflare Access app exist.
+name = "neo-api-disposable-staging"
+main = "worker/src/index.ts"
+compatibility_date = "2026-11-20"
+workers_dev = true
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+[vars]
+NEO_ENV = "disposable-staging"
+MAX_REQUESTS_PER_MINUTE = "30"
+MAX_MONTHLY_SPEND_USD_MICROS = "0"
+MAX_MONTHLY_INPUT_TOKENS = "0"
+MAX_MONTHLY_OUTPUT_TOKENS = "0"
+MAX_PROMPT_BYTES = "64000"
+MAX_OUTPUT_TOKENS = "256"
+MODEL_PRIMARY_INPUT_USD_MICROS_PER_1M = "0"
+MODEL_PRIMARY_OUTPUT_USD_MICROS_PER_1M = "0"
+MODEL_BACKUP_INPUT_USD_MICROS_PER_1M = "0"
+MODEL_BACKUP_OUTPUT_USD_MICROS_PER_1M = "0"
+VOICE_TRANSCRIBE_MAX_COST_USD_MICROS = "0"
+VOICE_SYNTHESIS_MAX_COST_USD_MICROS = "0"
+MAX_BODY_BYTES = "500000"
+ACCESS_TEAM_DOMAIN = "https://REPLACE-WITH-DEDICATED-TEAM.cloudflareaccess.com"
+ACCESS_AUD = "REPLACE-WITH-DISPOSABLE-ACCESS-APP-AUDIENCE"
+MODEL_PRIMARY_NAME = "unset"
+MODEL_BACKUP_NAME = "unset"
+MODEL_PRIMARY_URL = ""
+MODEL_BACKUP_URL = ""
+
+[[d1_databases]]
+binding = "DB"
+database_name = "neo-disposable-staging"
+database_id = "REPLACE-WITH-DEDICATED-D1-ID"
+migrations_dir = "../migrations"

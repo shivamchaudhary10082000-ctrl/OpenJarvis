@@ -1,37 +1,44 @@
 # NEO Cloudflare infrastructure scaffold
 
-This directory contains the D1 schema, API contract, Worker source, and starter web/Android device clients. The Worker is implemented but has not been deployed or connected to a Cloudflare account.
+This directory contains the D1 schema, API contract, Worker source, and starter web/Android device clients. The Worker has a local integration test suite but has **not** been deployed or connected to a Cloudflare account.
 
-## Contract
+## Contract and resources
 
-See `openapi.yaml` for the draft device, encrypted-memory, task-lease, and chat-routing API. The contract now has Worker handlers and basic route tests. It is still an evolving v0 API; full D1 integration/security tests and staging validation remain required.
+See openapi.yaml for the v0 device, encrypted-memory, task-lease, chat-routing and voice API.
 
-## Intended resources
-
-- One Worker as the authenticated API gateway and model-routing control plane.
-- One D1 database for account/device metadata, immutable encrypted memory revisions, task leases, and audit events.
-- One R2 bucket for client-encrypted attachments, exports, and snapshots.
-- One Durable Object namespace for per-account coordination and device/task presence.
-- Cloudflare Access in front of the Worker, with JWT audience validation in the Worker itself.
+Intended resources:
+- Workers for authenticated API gateway, policy checks, model routing and provider adapters.
+- D1 for accounts, devices, encrypted memory revisions, task leases, audit records, rate limits, idempotency and spend/token ledgers.
+- R2 for client-encrypted attachments, exports and snapshots (not yet implemented).
+- Durable Objects for per-account ordering, device/task coordination and presence (not yet implemented).
+- Cloudflare Access for user identity; the Worker verifies the Access JWT itself.
 
 ## Before provisioning
 
-1. Create or select the Cloudflare account and confirm the intended billing plan.
+1. Confirm the Cloudflare account and billing plan.
 2. Create a Cloudflare Access application and record its audience tag and team issuer domain.
-3. Decide the account identity source and test account deletion/recovery.
-4. Create D1, R2, and Durable Object resources in a staging environment first.
-5. Apply all ordered migrations (`0001_neo_core.sql` through `0005_provider_spend_limits.sql`) to the staging D1 database.
-6. Configure secrets through Wrangler/Cloudflare secret storage. Never commit Access credentials, model provider keys, signing keys, or encryption keys.
-7. Deploy only a health-check build first. Add authenticated routes after JWT verification and device revocation tests pass.
+3. Decide account identity, recovery and deletion behavior.
+4. Create D1/R2/Durable Object resources in staging first.
+5. Apply migrations 0001_neo_core.sql through 0008_provider_token_budgets.sql in order.
+6. Configure Access and provider secrets only through Wrangler/Cloudflare secret storage.
+7. Keep provider credentials unset until provider selection, current pricing, monthly USD cap, input/output token caps and voice per-request ceilings are approved.
+8. Deploy only to staging after migration, authentication, rollback and recovery tests pass.
 
 ## Data protection rules
 
-- Store only client-encrypted memory payloads in D1. Keep nonce and key version alongside each ciphertext.
-- Never put raw chat transcripts, provider API keys, or private device keys in D1 or R2.
-- R2 objects must be encrypted before upload; use opaque object keys that do not reveal user names or content.
-- D1 rows are versioned. Do not overwrite a prior approved revision in place; write a new revision and preserve deletion tombstones until all device replicas have acknowledged them.
-- Use D1 for durable truth. Durable Object in-memory state is a coordination cache and must be reconstructible.
+- Store only client-encrypted memory/task payloads in D1. Keep nonce and key version with each ciphertext.
+- The web and Android offline queues accept encrypted payload bodies only; do not enqueue plaintext conversation data.
+- Never put Access tokens, provider API keys, private device keys or memory encryption keys in D1, R2 or Git.
+- Encrypt attachments before R2 upload; use opaque object keys.
+- Memory revisions are immutable. Deletion uses tombstones; propagate tombstones to caches and replicas.
+- D1 is durable truth. Durable Object state must be reconstructible.
 
-## Not yet implemented
+## Spend and token controls
 
-No Cloudflare resources have been provisioned. R2 attachment storage, Durable Object coordination, a hard provider spend ceiling/token budget, full D1-backed integration tests, and deployment configuration remain outstanding. A fixed-window D1 per-account rate limiter is implemented in migration `0004_api_rate_limits.sql`; it still needs D1 integration testing. See worker/README.md for implementation and staging steps.
+The Worker reserves per-account monthly USD-micro spend plus monthly input/output tokens before any chat provider request. It reserves the worst-case cost/tokens for every provider candidate that may be attempted. Failed attempts are charged conservatively; missing usage is settled at the reservation. Voice requests require a maximum per-request cost ceiling and share the monthly spend budget.
+
+All non-test defaults for budgets, model pricing and voice ceilings are zero. This deliberately blocks paid inference until the owner configures reviewed values. Pricing is manual and must be checked against the chosen provider/model before enabling.
+
+## Not yet complete
+
+No Cloudflare resources are provisioned. R2, Durable Object coordination, automated spend-reservation reconciliation, budget alerts, local model inference fallback, background outbox retry scheduling, remote D1 staging tests, rollback/restore rehearsal and independent penetration testing remain outstanding.

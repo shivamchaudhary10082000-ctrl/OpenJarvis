@@ -29,4 +29,5 @@ jobs:
       - run: npm install --ignore-scripts
       - run: npx --yes @redocly/cli@2.82.0 lint ../openapi.yaml
       - run: npm run check
+      - run: npm run deploy:dry-run
       - run: npm test

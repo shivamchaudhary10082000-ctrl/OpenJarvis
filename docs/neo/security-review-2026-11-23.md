@@ -7,7 +7,7 @@ This is not a third-party penetration test, production certification, remote D1 
 
 ## Executive verdict
 
-**Partial — not release ready.** The source now includes meaningful security boundaries and 43 passing local Worker tests. It also includes fail-closed financial/token budgets and ciphertext-only offline queues. However, no remote resources are deployed, real provider behavior is untested, Android is not built/tested on a device, and operational recovery/security controls remain incomplete.
+**Partial — not release ready.** The source now includes meaningful security boundaries and 48 passing local Worker tests. It also includes fail-closed financial/token budgets and ciphertext-only offline queues. However, no remote resources are deployed, real provider behavior is untested, Android is not built/tested on a device, and operational recovery/security controls remain incomplete.
 
 ## Controls implemented and tested locally
 
@@ -20,7 +20,7 @@ This is not a third-party penetration test, production certification, remote D1 
 - Task idempotency, capability-aware claims, concurrent lease race and expired-lease recovery.
 - Atomic monthly spend reservations, concurrent reservation cap, settlement guard and monthly token-budget reservations.
 - Primary/backup failover, explicit model no-fallback, allow_fallback=false, provider network failure and mocked voice transcription/synthesis.
-- CI run #93 passed on commit 5ddb9f6f81b88475030cdefab32f9291247f8b61: Redocly OpenAPI lint, TypeScript check, Wrangler deployment dry-run and 43 tests.
+- CI run #106 passed on PR head `9e2d2fd4783cfc77c3cdc3cea9e3eed664e71922`: Redocly OpenAPI lint, TypeScript check, Wrangler deployment dry-run and 48 tests across 3 files. Added fake-IndexedDB persistence/reconstruction/outbox tests, 90-second heartbeat expiry/recovery, and voice upstream-timeout reservation accounting.
 
 ## Residual findings
 
@@ -50,13 +50,19 @@ The tests verify routing and request accounting against mocks. They do not estab
 
 **Required:** After budget and credentials are explicitly approved, test with low hard caps and provider sandbox credentials. Verify each provider's usage fields and billing semantics.
 
+### High — Desktop dependency audit is currently failing
+
+The latest repository security workflow failed its Rust advisory gate for `frontend/src-tauri/Cargo.lock`: `cookie 0.18.1` is affected by RUSTSEC-2026-0594 (private-cookie AES-GCM nonce reuse under a specific fork/thread deployment pattern). The advisory's documented exploit preconditions are unusual and may not match the current Tauri desktop process model, but the dependency is still flagged and the CI gate is red. The fixed release identified by the advisory is `cookie 0.18.3`. Upgrade the dependency through its parent Tauri dependency graph, regenerate the lockfile, and rerun the full desktop build/advisory checks; do not suppress this advisory without a documented applicability review.
+
 ### Medium — Browser same-origin script execution remains a risk
 
 The web client re-imports its P-256 private key as non-exportable before persistence, and namespaces identity/cache/outbox by a hashed account scope. The Android starter similarly scopes its Keystore alias, SharedPreferences device ID and SQLite database by account. Non-exportable storage does not protect against same-origin XSS that can invoke signing or read Access tokens.
 
-**Required:** Strict CSP, dependency pinning/audit, Trusted Types where applicable, no unsafe inline scripts, secure Access-token lifecycle, recovery/re-enrolment and browser persistence tests.
+**Required:** Strict CSP, dependency pinning/audit, Trusted Types where applicable, no unsafe inline scripts, secure Access-token lifecycle, recovery/re-enrolment and browser persistence tests. Fake IndexedDB tests now cover basic storage/recovery, but the CryptoKey clone behavior uses a test adapter; native browser matrix testing remains.
 
 ### Medium — Android source is not a tested application
+
+A bookkeeping defect in `flushOutbox()` that left the reported sent count at zero was corrected. This is source-only; no Kotlin compile or real-device test is available.
 
 The Android client uses Android Keystore and SQLite for ciphertext-only offline data, but the repository has no Android Gradle app/test project. Kotlin compilation, SQLite migrations, background execution, key invalidation, backup exclusion and real-device behavior remain unverified.
 

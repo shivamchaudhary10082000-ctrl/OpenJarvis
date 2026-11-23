@@ -24,18 +24,18 @@ This report separates source implementation from tested behavior and from produc
 | Model routing | Implemented | Primary/backup routing, explicit model no-fallback behavior, auto, allow_fallback=false, and provider/tier/fallback metadata. |
 | Web client | Source implemented; TypeScript checked | Non-exportable P-256 key in IndexedDB; encrypted memory cache; durable ciphertext-only outbox; idempotent replay; manual flush; heartbeat; task and voice transport. |
 | Android client | Starter source implemented; not built on Android CI | Android Keystore P-256 identity; SQLite ciphertext-only cache/outbox; idempotent replay; heartbeat; signed requests and voice transport. |
-| API contract | Draft OpenAPI 3.1 | Device, memory, task, chat and voice routes; still needs automated contract linting. |
+| API contract | Draft OpenAPI 3.1 | Device, memory, task, chat and voice routes; Redocly lint passes in CI. |
 
 ## Verification evidence
 
 Latest NEO Worker run at the time of this report:
 
-- Workflow run #60: **Success**
-- Tested commit: 2047877723ae28c176ea0be973c2d46898e1d800
+- Workflow run #69: **Success**
+- Tested commit: a196c44a84eca5a84da004835550ad8fe6f5dc57
 - npm install --ignore-scripts: passed; npm reported 0 vulnerabilities.
 - npm run check: passed.
 - npm test: passed.
-- Vitest: **2 test files, 40 tests passed**.
+- Vitest: **2 test files, 40 tests passed**.\n- Redocly OpenAPI 3.1 lint: passed with no warnings.\n- Wrangler deployment dry-run using the test config: passed; Worker bundle 43.34 KiB (10.42 KiB gzip).
 
 D1-backed integration coverage includes:
 - Valid/invalid Access JWT signature, issuer, audience and expiry.

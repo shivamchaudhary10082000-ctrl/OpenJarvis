@@ -1,85 +1,76 @@
 # NEO security and integration review
 
 **Review date:** 2026-11-23  
-**Reviewed revision:** `0005e05b4134eb76b2cd0b88dd8d32b5fd24467b`  
-**Scope:** Repository-level review of the initial Cloudflare Worker, D1 schema, memory trust path, and client integration primitives.
+**Scope:** Source-level review of the Cloudflare Worker, D1 migrations 0001–0008, provider budget controls, web/Android client primitives and local integration tests.
 
-This is an engineering review of the checked-in source, not a third-party penetration test, Cloudflare deployment assessment, or production security certification. No live account, provider credential, D1 database, or device was accessed.
+This is not a third-party penetration test, production certification, remote D1 validation or Cloudflare staging assessment. No live account, provider credential, production data or device was accessed.
 
-## Executive assessment
+## Executive verdict
 
-The repository now contains executable Worker handlers and starter Android/web transport primitives. The service is still not ready for real user data or provider credentials. The principal blockers are operational abuse controls, end-to-end authentication tests, and real D1 concurrency tests.
+**Partial — not release ready.** The source now includes meaningful security boundaries and 39 passing local Worker tests. It also includes fail-closed financial/token budgets and ciphertext-only offline queues. However, no remote resources are deployed, real provider behavior is untested, Android is not built/tested on a device, and operational recovery/security controls remain incomplete.
 
-## Findings
+## Controls implemented and tested locally
 
-### High — No hard provider spend ceiling; request rate limit added, D1 integration tests pending
+- Access JWT RS256 verification with issuer, audience and expiry checks.
+- P-256 device request proof, timestamp window and nonce replay rejection.
+- Account/device binding, cross-account denial, enrolment and revocation.
+- Device heartbeat and online/offline freshness reporting.
+- D1 per-account rate limiting.
+- Encrypted memory revision allocation, idempotent offline replay and cross-account isolation.
+- Task idempotency, capability-aware claims, concurrent lease race and expired-lease recovery.
+- Atomic monthly spend reservations, concurrent reservation cap, settlement guard and monthly token-budget reservations.
+- Primary/backup failover, explicit model no-fallback, allow_fallback=false, provider network failure and mocked voice transcription/synthesis.
+- CI run #53 passed on commit 0e2ba33f2da377d264fc7ae0aa13cd82e13123ce: TypeScript check and 39 tests.
 
-**Patched in this revision:** A D1-backed fixed-window per-account rate limiter now applies to authenticated device requests and first-device enrolment (default 60 requests/minute, configurable up to 600). SQLite-level validation confirmed the counter rejects request 61 and resets in the next minute. This still needs a real D1 integration test.
+## Residual findings
 
-**Still unresolved:** There is no durable token budget or hard daily/monthly provider spend ceiling. Rate limiting alone does not cap financial exposure. A valid enrolled device can still consume a large amount within the allowed request rate.
+### High — Financial configuration is intentionally disabled until owner approval
 
-**Required remediation:** Define the provider, model pricing, maximum request/output sizes, and owner-approved monthly budget; then implement a fail-closed D1 reservation/reconciliation design and concurrent cap tests. Keep provider secrets unset until this is complete and owner-approved.
+Non-test Wrangler values for monthly spend, monthly input/output tokens, model pricing and voice request ceilings are zero. Provider/voice routes therefore fail closed. This is correct for the current unapproved state.
 
-### High — Voice body limit is checked after full buffering
+**Remaining risk:** Pricing is manually configured and may become stale when model IDs or provider prices change. Caps are per account; they do not form a global aggregate ceiling for a shared provider API key across multiple accounts.
 
-**Patched in this revision:** Access-signed request-body hashing and the voice proxy now use a bounded stream reader. Voice requests are capped at 15 MB; JSON bodies use a validated configured limit capped at 5 MB (default 1 MB). Tests cover the exact boundary, an over-limit streamed body, and an oversized declared Content-Length. The tests have not yet run on this PR head, and a full Worker upload test remains required.
+**Required before enabling:** Select providers/models, verify current official pricing, set an owner-approved monthly USD cap plus input/output token caps, set conservative voice maximum costs for the 15 MB upload boundary, and add budget alerts/review cadence. Keep provider keys unset until then.
 
-### High — Authentication and D1 trust boundaries lack meaningful integration coverage
+### High — Settlement over-reservation requires manual reconciliation
 
-The Worker test suite currently proves only the public health route and rejection of a protected route without a bearer token, plus pure cursor, model metadata, and bounded-body-reader helper tests. It does not exercise valid/invalid Access JWT signatures, issuer/audience/expiry, device signatures, nonce replay, revocation, cross-account isolation, or D1-backed memory/task flows.
+D1 triggers reject monetary or token settlement above the reservation. The request fails closed and the reservation remains held, preventing further requests from consuming the same budget.
 
-**Required remediation:** Build deterministic Worker tests with a fake D1 binding and generated P-256/RSA test keys. Cover both allowed and denied cases before staging.
+**Remaining risk:** There is no automated reconciliation or operator UI to investigate and release/adjust a stranded reservation. A provider response with malformed or unexpectedly high usage can therefore block the account until manually reviewed.
 
-### Medium — Device task claims do not enforce declared capabilities
+### High — No remote staging or recovery evidence
 
-**Patched in this revision:** Migration `0003_task_capabilities.sql` adds optional task capability requirements. Task creation validates up to 32 unique capability identifiers, and the claim query excludes tasks unless the claiming device advertises every required capability. This still needs D1-backed integration tests with multiple devices and mixed capabilities.
+Local SQLite-backed D1 tests do not prove remote D1 behavior, Cloudflare Access configuration, secrets, DNS, migrations, deployment, rollback, backup restore or deletion propagation.
 
-### Medium — Memory revision allocation is vulnerable to concurrent create conflicts
+**Required:** Stage with a dedicated account, apply all eight migrations, verify Access issuer/audience, test backup/restore and rollback, then perform controlled security tests before any production rollout.
 
-**Patched in this revision:** Memory creation now allocates `MAX(revision)+1` inside the same `INSERT ... SELECT ... RETURNING` statement, removing the separate read/write race. A D1-backed concurrent-create test and stable conflict handling are still required.
+### Medium — Provider/voice tests are mocked
 
-### Medium — Browser device signing key was exportable (patched; browser integration test pending)
+The tests verify routing and request accounting against mocks. They do not establish real provider compatibility, actual usage reporting, timeout charging semantics, rate-limit response formats, transcription duration billing or synthesis response streaming.
 
-The web client previously generated an extractable private P-256 key, exported it to JWK, then re-imported it as non-extractable. The private key therefore existed in exportable form in application memory.
+**Required:** After budget and credentials are explicitly approved, test with low hard caps and provider sandbox credentials. Verify each provider's usage fields and billing semantics.
 
-**Patch in this revision:** Generate the key pair as non-extractable and persist the CryptoKey directly in IndexedDB; only the public JWK is exported. Browser storage is still exposed to same-origin script execution, so a production web client needs a strict CSP, dependency/XSS controls, secure Access-token handling, and a documented device recovery/re-enrolment path.
-### Medium — Provider tier metadata was derived from the candidate array index (patched; CI pending)
+### Medium — Browser same-origin script execution remains a risk
 
-The model router previously calculated `tier` and fallback metadata from the loop index. An explicitly selected backup provider became candidate index zero and was incorrectly reported as `primary`.
+The web client keeps its P-256 private key non-exportable in IndexedDB and stores encrypted payloads in a per-device cache/outbox. Non-exportable storage does not protect against same-origin XSS that can invoke signing or read Access tokens.
 
-**Patch in this revision:** Route metadata is now derived from provider identity and whether automatic routing actually moved from an available primary. Focused tests cover explicit backup selection, automatic failover, and backup-only configuration. These tests have not yet been executed by GitHub Actions on the updated PR head.
+**Required:** Strict CSP, dependency pinning/audit, Trusted Types where applicable, no unsafe inline scripts, secure Access-token lifecycle, recovery/re-enrolment and browser persistence tests.
 
-## Memory sync pagination fix in this revision
+### Medium — Android source is not a tested application
 
-The previous cursor used only `(updated_at, memory_id)`. Multiple immutable revisions can share the same second and memory ID, so a page boundary could skip rows. New writes inserted during pagination could also collide with the timestamp-based ordering.
+The Android client uses Android Keystore and SQLite for ciphertext-only offline data, but the repository has no Android Gradle app/test project. Kotlin compilation, SQLite migrations, background execution, key invalidation, backup exclusion and real-device behavior remain unverified.
 
-The Worker now uses the D1 implicit `rowid` of the append-only `memory_records` table as its opaque keyset cursor, returning records in insertion order. D1 BLOB ciphertext and nonce values are converted back to unpadded base64url strings at the API boundary so browser/Android clients receive the declared wire format. Cursor encode/decode validation has focused unit tests. This is not yet a D1 integration test; the assumption that memory rows are append-only must remain true. A database rebuild/restore that changes rowids must trigger a full client resynchronisation.
+### Medium — Offline replay is caller-driven
 
-## Staging gate
+Web IndexedDB and Android SQLite persist encrypted memory/task outbox items with idempotency keys. A caller must invoke flushOutbox; there is no background retry scheduler, exponential backoff, connectivity listener, conflict-resolution UI or local inference fallback.
 
-Do not deploy with real personal data or provider secrets until:
+### Medium — D1 and device operational hygiene
 
-1. The Worker TypeScript check and Vitest suite pass on the updated PR head (not yet verified as of this review).
-2. The D1-backed rate-limit and spend-budget enforcement tests pass.
-3. The remaining high-severity findings above are remediated and covered by tests.
-4. D1 migrations and concurrency tests pass against a disposable local/staging database.
-5. Access JWT, device proof, replay, revocation, and cross-account isolation tests pass.
-6. Synthetic-data staging validation and rollback are documented.
-7. The owner explicitly approves external Cloudflare resources and provider spending.
+Nonce records and spend reservations require retention/cleanup and operator monitoring. Device presence is refreshed by signed requests and a 90-second heartbeat window, but there is no autonomous health monitor or durable device capability grant/revocation workflow.
 
-## Explicitly not performed
+## Security boundary and deployment decision
 
-- No production or staging deployment.
-- No Cloudflare resource creation, DNS changes, or secrets configuration.
-- No provider API calls or paid inference.
-- No Android hardware enrolment or microphone test.
-- No claim of independent penetration-test completion.
-
-
-## 2026-11-23 implementation addendum — D1 and provider spend controls
-
-The Worker now has a Cloudflare Workers Vitest integration configuration using local SQLite-backed D1 and the repository's ordered migrations. New integration coverage exercises Access JWT signature/issuer/audience/expiry, P-256 device proof, nonce replay, account isolation, revocation, rate limiting, concurrent memory revision allocation, capability-aware task claims, competing task leases, and expired-lease recovery. Provider tests exercise primary failure/backup success, explicit-model no-fallback, monthly cap rejection, and voice transcription upload forwarding.
-
-Migration `0005_provider_spend_limits.sql` adds per-account monthly spend rows, reservation records, and SQLite triggers. Reservations are atomically rejected when reserved plus settled spend would exceed the monthly cap; settlement releases the reservation and records actual or conservative maximum cost. Chat calls require reviewed per-provider input/output rates, are bounded by prompt bytes and output tokens, and reserve the worst-case cost of every candidate that may be attempted. Failed provider attempts are conservatively charged their reservation. Voice calls require a reviewed maximum per-request cost and are charged at that ceiling.
-
-**Fail-closed defaults:** `MAX_MONTHLY_SPEND_USD_MICROS`, model prices, and voice per-request ceilings are set to `0` in the non-test Wrangler configuration. Therefore provider and voice inference remain blocked until the owner chooses a provider/model, verifies current pricing, and explicitly configures a monthly budget and voice cost ceilings. The integration tests and CI have been added but have not yet been executed on the current PR head. This is not a penetration test or staging validation.
+- Do not add provider secrets or user data yet.
+- Do not provision paid inference or deploy to production.
+- Keep PR #1 Draft.
+- Complete staging migration/rollback/restore tests, real provider cost verification, Android/browser validation and an independent penetration test before release.

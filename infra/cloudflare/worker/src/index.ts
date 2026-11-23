@@ -11,6 +11,15 @@ export interface Env {
   NEO_ENV?: string;
   MAX_BODY_BYTES?: string;
   MAX_REQUESTS_PER_MINUTE?: string;
+  MAX_MONTHLY_SPEND_USD_MICROS?: string;
+  MAX_PROMPT_BYTES?: string;
+  MAX_OUTPUT_TOKENS?: string;
+  MODEL_PRIMARY_INPUT_USD_MICROS_PER_1M?: string;
+  MODEL_PRIMARY_OUTPUT_USD_MICROS_PER_1M?: string;
+  MODEL_BACKUP_INPUT_USD_MICROS_PER_1M?: string;
+  MODEL_BACKUP_OUTPUT_USD_MICROS_PER_1M?: string;
+  VOICE_TRANSCRIBE_MAX_COST_USD_MICROS?: string;
+  VOICE_SYNTHESIS_MAX_COST_USD_MICROS?: string;
 }
 type Claims = { sub: string; iss: string; aud: string | string[]; exp: number; email?: string };
 type Device = { device_id: string; account_id: string; public_key_jwk: string; revoked_at: number | null };
@@ -27,6 +36,52 @@ export function encodeBytesBase64Url(bytes: Uint8Array): string {
 const enc = new TextEncoder();
 const now = () => Math.floor(Date.now() / 1000);
 class RateLimitExceeded extends Error {}
+const spendMonth = () => new Date().toISOString().slice(0, 7);
+function positiveConfig(value: string | undefined): number | null {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+function costMicros(inputTokens: number, outputTokens: number, inputRate: number, outputRate: number): number {
+  const raw = inputTokens * inputRate + outputTokens * outputRate;
+  if (!Number.isSafeInteger(raw) || raw < 0) throw new Error("Provider price calculation overflow");
+  return Math.ceil(raw / 1_000_000);
+}
+async function reserveProviderSpend(
+  account: string,
+  env: Env,
+  amountMicros: number,
+  providerLabel: string,
+): Promise<string | null> {
+  const limit = positiveConfig(env.MAX_MONTHLY_SPEND_USD_MICROS);
+  if (!limit || !Number.isSafeInteger(amountMicros) || amountMicros <= 0) return null;
+  const month = spendMonth();
+  const timestamp = now();
+  await env.DB.prepare(
+    "INSERT INTO provider_spend_usage(account_id,month_key,budget_microusd,reserved_microusd,spent_microusd,updated_at) VALUES(?,?,?,0,0,?) ON CONFLICT(account_id,month_key) DO UPDATE SET budget_microusd=excluded.budget_microusd,updated_at=excluded.updated_at",
+  ).bind(account, month, limit, timestamp).run();
+  const reservationId = id();
+  try {
+    await env.DB.prepare(
+      "INSERT INTO provider_spend_reservations(reservation_id,account_id,month_key,reserved_microusd,state,provider_label,created_at) VALUES(?,?,?,?,'reserved',?,?)",
+    ).bind(reservationId, account, month, amountMicros, providerLabel.slice(0, 160), timestamp).run();
+    return reservationId;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("spend_budget_exceeded")) return null;
+    throw error;
+  }
+}
+async function settleProviderSpend(
+  env: Env,
+  reservationId: string,
+  spentMicros: number,
+): Promise<void> {
+  if (!Number.isSafeInteger(spentMicros) || spentMicros < 0) throw new Error("Invalid provider spend settlement");
+  const result = await env.DB.prepare(
+    "UPDATE provider_spend_reservations SET state='settled',settled_microusd=?,settled_at=? WHERE reservation_id=? AND state='reserved'",
+  ).bind(spentMicros, now(), reservationId).run();
+  if (!result.meta.changes) throw new Error("Provider spend reservation was already settled or missing");
+}
 async function enforceAccountRateLimit(account: string, env: Env): Promise<void> {
   const configured = Number(env.MAX_REQUESTS_PER_MINUTE || 60);
   const limit = Number.isSafeInteger(configured) && configured > 0 ? Math.min(configured, 600) : 60;
@@ -328,8 +383,8 @@ async function route(req: Request, env: Env): Promise<Response> {
       return result.meta.changes ? json({task_id:taskPath[1],state:x.state}) : fail(409,"lease_conflict","Task lease is not owned by this device");
     }
     if (path === "/chat/completions" && req.method === "POST") return modelRoute(req,env,account);
-    if (path === "/voice/transcribe" && req.method === "POST") return voiceRoute(req,env,"transcribe");
-    if (path === "/voice/synthesize" && req.method === "POST") return voiceRoute(req,env,"synthesize");
+    if (path === "/voice/transcribe" && req.method === "POST") return voiceRoute(req,env,"transcribe",account);
+    if (path === "/voice/synthesize" && req.method === "POST") return voiceRoute(req,env,"synthesize",account);
     return fail(404,"not_found","Route not found");
   } catch(e) {
     const message=e instanceof Error?e.message:"Request failed";
@@ -365,12 +420,19 @@ export function modelRouteMetadata(
   };
 }
 
+type Provider = {
+  url?: string;
+  name: string;
+  key?: string;
+  inputRate?: number | null;
+  outputRate?: number | null;
+};
 async function modelRoute(req:Request,env:Env,account:string):Promise<Response>{
   const x=await bodyJson<any>(req,env);
   if (!Array.isArray(x.messages) || x.messages.length<1 || x.messages.length>100) return fail(400,"invalid_messages","messages must contain 1–100 entries");
   const routing=resolveModelRouting(x.model,x.allow_fallback);
-  const primary={url:env.MODEL_PRIMARY_URL,name:env.MODEL_PRIMARY_NAME||"primary",key:env.MODEL_PRIMARY_API_KEY};
-  const backup={url:env.MODEL_BACKUP_URL,name:env.MODEL_BACKUP_NAME||"backup",key:env.MODEL_BACKUP_API_KEY};
+  const primary:Provider={url:env.MODEL_PRIMARY_URL,name:env.MODEL_PRIMARY_NAME||"primary",key:env.MODEL_PRIMARY_API_KEY,inputRate:positiveConfig(env.MODEL_PRIMARY_INPUT_USD_MICROS_PER_1M),outputRate:positiveConfig(env.MODEL_PRIMARY_OUTPUT_USD_MICROS_PER_1M)};
+  const backup:Provider={url:env.MODEL_BACKUP_URL,name:env.MODEL_BACKUP_NAME||"backup",key:env.MODEL_BACKUP_API_KEY,inputRate:positiveConfig(env.MODEL_BACKUP_INPUT_USD_MICROS_PER_1M),outputRate:positiveConfig(env.MODEL_BACKUP_OUTPUT_USD_MICROS_PER_1M)};
   const choices=[primary,backup].filter(p=>p.url&&p.key);
   if (!choices.length) return fail(503,"model_unconfigured","No model provider is configured");
   if (routing.explicit && !choices.some(p=>p.name===routing.requestedModel)) return fail(400,"model_unavailable","Explicitly requested model is not configured; no fallback was attempted");
@@ -378,26 +440,71 @@ async function modelRoute(req:Request,env:Env,account:string):Promise<Response>{
     ? choices.filter(p=>p.name===routing.requestedModel)
     : routing.automaticFallback ? choices : choices.filter(p=>p.name===primary.name);
   if (!candidates.length) return fail(503,"model_unconfigured","No primary model is configured and automatic fallback is disabled");
+  const configuredOutput=positiveConfig(env.MAX_OUTPUT_TOKENS)||1024;
+  const requestedOutput=x.max_completion_tokens ?? x.max_tokens ?? configuredOutput;
+  if (!Number.isSafeInteger(requestedOutput) || requestedOutput<1 || requestedOutput>configuredOutput) return fail(400,"invalid_token_limit","Requested output tokens exceed the configured per-request maximum");
+  const promptBytes=encoder.encode(JSON.stringify(x.messages)).byteLength;
+  const maxPromptBytes=positiveConfig(env.MAX_PROMPT_BYTES)||128_000;
+  if(promptBytes>maxPromptBytes)return fail(413,"prompt_too_large","Prompt exceeds the configured byte limit");
+  if(candidates.some(p=>!p.inputRate||!p.outputRate))return fail(503,"spend_pricing_unconfigured","Every eligible provider must have positive, reviewed input and output pricing before use");
+  const reservations=candidates.map(p=>({
+    provider:p,
+    maximum:costMicros(promptBytes,requestedOutput,p.inputRate!,p.outputRate!),
+  }));
+  const totalReserve=reservations.reduce((sum,item)=>sum+item.maximum,0);
+  if(!Number.isSafeInteger(totalReserve)||totalReserve<=0)return fail(503,"spend_pricing_invalid","Provider spend reservation could not be calculated safely");
+  const reservationId=await reserveProviderSpend(account,env,totalReserve,candidates.map(p=>p.name).join(","));
+  if(!reservationId)return fail(429,"spend_budget_exceeded","Monthly provider spend budget is unset or exhausted; no provider request was sent");
+  let attemptedSpend=0;
   let lastError="provider_unavailable";
-  for(let i=0;i<candidates.length;i++){
-    const p=candidates[i];
+  for(let i=0;i<reservations.length;i++){
+    const {provider:p,maximum}=reservations[i];
     try{
       const started=Date.now();
-      const response=await fetch(p.url!.replace(/\/$/,"")+"/chat/completions",{method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+p.key!},body:JSON.stringify({...x,model:p.name,stream:false}),signal:AbortSignal.timeout(60_000)});
-      if(!response.ok){lastError="provider_http_"+response.status;if((response.status<500&&response.status!==429)||i===candidates.length-1) return fail(502,"provider_error",lastError);continue;}
-      const payload=await response.json() as Record<string, unknown>;
+      const forwarded={...x,model:p.name,stream:false,max_tokens:requestedOutput};
+      delete (forwarded as Record<string,unknown>).max_completion_tokens;
+      const response=await fetch(p.url!.replace(/\/$/,"")+"/chat/completions",{method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+p.key!},body:JSON.stringify(forwarded),signal:AbortSignal.timeout(60_000)});
+      if(!response.ok){
+        attemptedSpend+=maximum;
+        lastError="provider_http_"+response.status;
+        if((response.status<500&&response.status!==429)||i===reservations.length-1){
+          try{await settleProviderSpend(env,reservationId,attemptedSpend);}catch{return fail(503,"spend_settlement_failed","Provider spend could not be reconciled; further inference is blocked");}
+          return fail(502,"provider_error",lastError);
+        }
+        continue;
+      }
+      const payload=await response.json() as Record<string,unknown>;
+      const usage=payload.usage as {prompt_tokens?:unknown;completion_tokens?:unknown}|undefined;
+      const promptTokens=Number(usage?.prompt_tokens);
+      const completionTokens=Number(usage?.completion_tokens);
+      const actualSpend=Number.isSafeInteger(promptTokens)&&promptTokens>=0&&Number.isSafeInteger(completionTokens)&&completionTokens>=0
+        ? costMicros(promptTokens,completionTokens,p.inputRate!,p.outputRate!)
+        : maximum;
+      try{await settleProviderSpend(env,reservationId,attemptedSpend+actualSpend);}catch{return fail(503,"spend_settlement_failed","Provider spend could not be reconciled; further inference is blocked");}
       return json({ ...payload, neo:{provider:p.name,model:p.name,...modelRouteMetadata(p.name,primary.name,routing.automaticFallback,Boolean(primary.url&&primary.key),lastError,Date.now()-started)}});
-    }catch(e){lastError=e instanceof Error?e.name:"provider_network_error";if(routing.explicit||i===candidates.length-1)return fail(502,"provider_error",lastError);}
+    }catch(e){
+      attemptedSpend+=maximum;
+      lastError=e instanceof Error?e.name:"provider_network_error";
+      if(routing.explicit||i===reservations.length-1){
+        try{await settleProviderSpend(env,reservationId,attemptedSpend);}catch{return fail(503,"spend_settlement_failed","Provider spend could not be reconciled; further inference is blocked");}
+        return fail(502,"provider_error",lastError);
+      }
+    }
   }
+  try{await settleProviderSpend(env,reservationId,attemptedSpend);}catch{return fail(503,"spend_settlement_failed","Provider spend could not be reconciled; further inference is blocked");}
   return fail(502,"provider_error",lastError);
 }
-async function voiceRoute(req:Request,env:Env,mode:"transcribe"|"synthesize"):Promise<Response>{
-  const url=mode==="transcribe"?env.MODEL_PRIMARY_URL:env.MODEL_PRIMARY_URL;
+async function voiceRoute(req:Request,env:Env,mode:"transcribe"|"synthesize",account:string):Promise<Response>{
+  const url=env.MODEL_PRIMARY_URL;
   const key=env.MODEL_PRIMARY_API_KEY;
   if(!url||!key)return fail(503,"voice_unconfigured","Voice provider is not configured");
+  const maxCost=positiveConfig(mode==="transcribe"?env.VOICE_TRANSCRIBE_MAX_COST_USD_MICROS:env.VOICE_SYNTHESIS_MAX_COST_USD_MICROS);
+  if(!maxCost)return fail(503,"voice_pricing_unconfigured","A reviewed maximum per-request voice cost is required before voice use");
+  const reservationId=await reserveProviderSpend(account,env,maxCost,"voice:"+mode);
+  if(!reservationId)return fail(429,"spend_budget_exceeded","Monthly provider spend budget is unset or exhausted; no voice request was sent");
   let data: Uint8Array;
   try { data=await readRequestBodyBounded(req,15_000_000); }
-  catch { return fail(413,"body_too_large","Voice payload exceeds 15 MB"); }
+  catch { await settleProviderSpend(env,reservationId,0); return fail(413,"body_too_large","Voice payload exceeds 15 MB"); }
   const endpoint=mode==="transcribe"?"/audio/transcriptions":"/audio/speech";
   const bodyBytes = new Uint8Array(data.byteLength);
   bodyBytes.set(data);
@@ -413,7 +520,14 @@ async function voiceRoute(req:Request,env:Env,mode:"transcribe"|"synthesize"):Pr
   } else {
     headers["content-type"]="application/json";
   }
-  const upstream=await fetch(url.replace(/\/$/,"")+endpoint,{method:"POST",headers,body,signal:AbortSignal.timeout(90_000)});
+  let upstream:Response;
+  try{
+    upstream=await fetch(url.replace(/\/$/,"")+endpoint,{method:"POST",headers,body,signal:AbortSignal.timeout(90_000)});
+  }catch{
+    try{await settleProviderSpend(env,reservationId,maxCost);}catch{return fail(503,"spend_settlement_failed","Voice spend could not be reconciled; further inference is blocked");}
+    return fail(502,"voice_provider_error","Voice provider request failed");
+  }
+  try{await settleProviderSpend(env,reservationId,maxCost);}catch{return fail(503,"spend_settlement_failed","Voice spend could not be reconciled; further inference is blocked");}
   return new Response(upstream.body,{status:upstream.status,headers:{"content-type":upstream.headers.get("content-type")||"application/octet-stream","cache-control":"no-store"}});
 }
 export default { fetch: (req:Request,env:Env) => route(req,env) };

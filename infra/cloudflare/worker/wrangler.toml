@@ -3,6 +3,9 @@ main = "src/index.ts"
 compatibility_date = "2026-11-20"
 workers_dev = true
 
+[triggers]
+crons = ["*/15 * * * *"]
+
 [vars]
 NEO_ENV = "staging"
 MAX_REQUESTS_PER_MINUTE = "60"

@@ -3,5 +3,6 @@ import { applyD1Migrations } from "cloudflare:test";
 import { beforeAll } from "vitest";
 
 beforeAll(async () => {
-  await applyD1Migrations(env.DB, env.TEST_MIGRATIONS as D1Migration[]);
+  const bindings = env as unknown as { DB: D1Database; TEST_MIGRATIONS: Parameters<typeof applyD1Migrations>[1] };
+  await applyD1Migrations(bindings.DB, bindings.TEST_MIGRATIONS);
 });

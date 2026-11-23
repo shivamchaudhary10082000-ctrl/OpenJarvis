@@ -63,7 +63,7 @@ async function removeOutbox(id:string):Promise<void>{
   const db=await openDb();
   try{const tx=db.transaction("outbox","readwrite");tx.objectStore("outbox").delete(id);await transactionDone(tx);}finally{db.close();}
 }
-async function cacheMemory(records:Record<string,unknown>[],namespace:string):Promise<void>{
+async function cacheMemory(records:Record<string,unknown>[],scopeKey:string):Promise<void>{
   if(!records.length)return;
   const db=await openDb();
   try{
@@ -71,30 +71,30 @@ async function cacheMemory(records:Record<string,unknown>[],namespace:string):Pr
     for(const record of records){
       if(typeof record.memory_id!=="string"||typeof record.revision!=="number")continue;
       // Cache only the encrypted wire record; never decrypt or persist plaintext here.
-      store.put({key:namespace+":"+record.memory_id+":"+record.revision,record} satisfies CachedMemory);
+      store.put({key:scopeKey+":"+record.memory_id+":"+record.revision,record} satisfies CachedMemory);
     }
     await transactionDone(tx);
   }finally{db.close();}
 }
-async function readCachedMemory(includePending=false,namespace:string):Promise<Record<string,unknown>[]>{
+async function readCachedMemory(includePending=false,scopeKey:string):Promise<Record<string,unknown>[]>{
   const db=await openDb();
   try{
     const rows=await new Promise<CachedMemory[]>((resolve,reject)=>{
       const r=db.transaction("memory_cache","readonly").objectStore("memory_cache").getAll();
       r.onsuccess=()=>resolve(r.result as CachedMemory[]);r.onerror=()=>reject(r.error);
     });
-    return rows.filter(row=>row.key.startsWith(namespace+":")).map(row=>row.record).filter(record=>includePending||record.trust_state==="approved"||record.trust_state==="deleted")
+    return rows.filter(row=>row.key.startsWith(scopeKey+":")).map(row=>row.record).filter(record=>includePending||record.trust_state==="approved"||record.trust_state==="deleted")
       .sort((a,b)=>Number(a.updated_at||0)-Number(b.updated_at||0));
   }finally{db.close();}
 }
-async function saveCursor(cursor:string|null,namespace:string):Promise<void>{
+async function saveCursor(cursor:string|null,scopeKey:string):Promise<void>{
   const db=await openDb();
-  try{const tx=db.transaction("meta","readwrite");tx.objectStore("meta").put(cursor,"memory_cursor:"+namespace);await transactionDone(tx);}finally{db.close();}
+  try{const tx=db.transaction("meta","readwrite");tx.objectStore("meta").put(cursor,"memory_cursor:"+scopeKey);await transactionDone(tx);}finally{db.close();}
 }
-async function loadCursor(namespace:string):Promise<string|undefined>{
+async function loadCursor(scopeKey:string):Promise<string|undefined>{
   const db=await openDb();
   try{return await new Promise((resolve,reject)=>{
-    const r=db.transaction("meta","readonly").objectStore("meta").get("memory_cursor:"+namespace);
+    const r=db.transaction("meta","readonly").objectStore("meta").get("memory_cursor:"+scopeKey);
     r.onsuccess=()=>resolve(typeof r.result==="string"?r.result:undefined);r.onerror=()=>reject(r.error);
   });}finally{db.close();}
 }

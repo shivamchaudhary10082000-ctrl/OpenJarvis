@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import worker, { decodeMemoryCursor, encodeMemoryCursor, modelRouteMetadata } from "../src/index";
+import worker, { decodeMemoryCursor, encodeMemoryCursor, modelRouteMetadata, readRequestBodyBounded } from "../src/index";
 const env = {} as any;
 describe("NEO Worker unauthenticated surface", () => {
   it("exposes a minimal health response without authentication", async () => {
@@ -53,5 +53,35 @@ describe("NEO model route disclosure", () => {
 
   it("does not claim fallback when only the backup is configured", () => {
     expect(modelRouteMetadata("backup-model", "primary-model", true, false, "not_used", 20).fallback_used).toBe(false);
+  });
+});
+
+
+describe("bounded request body reader", () => {
+  it("accepts a body exactly at the configured limit", async () => {
+    const req = new Request("https://neo.example/upload", { method: "POST", body: "12345" });
+    const body = await readRequestBodyBounded(req, 5);
+    expect(new TextDecoder().decode(body)).toBe("12345");
+  });
+
+  it("rejects a streamed body that exceeds the limit without buffering the remainder", async () => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("1234"));
+        controller.enqueue(new TextEncoder().encode("5678"));
+      },
+      cancel() { cancelled = true; },
+    });
+    const req = new Request("https://neo.example/upload", { method: "POST", body: stream, duplex: "half" } as RequestInit);
+    await expect(readRequestBodyBounded(req, 5)).rejects.toThrow("Request body too large");
+    expect(cancelled).toBe(true);
+  });
+
+  it("rejects an oversized declared Content-Length before reading", async () => {
+    const req = new Request("https://neo.example/upload", {
+      method: "POST", headers: { "content-length": "999" }, body: "x",
+    });
+    await expect(readRequestBodyBounded(req, 10)).rejects.toThrow("Request body too large");
   });
 });

@@ -197,7 +197,16 @@ async function route(req: Request, env: Env): Promise<Response> {
   try {
     if (path === "/devices" && req.method === "GET") {
       const result = await env.DB.prepare("SELECT device_id, label, platform, capabilities_json, created_at, last_seen_at, revoked_at FROM devices WHERE account_id = ? ORDER BY created_at").bind(account).all();
-      return json({ devices: result.results });
+      const devices = result.results.map((row: any) => {
+        let capabilities: string[] = [];
+        try { const parsed = JSON.parse(row.capabilities_json || "[]"); if (isValidCapabilityList(parsed)) capabilities = parsed; } catch {}
+        return {
+          device_id: row.device_id, label: row.label, platform: row.platform, capabilities,
+          status: row.revoked_at === null ? "active" : "revoked",
+          created_at: row.created_at, last_seen_at: row.last_seen_at,
+        };
+      });
+      return json({ devices });
     }
     if (path === "/devices" && req.method === "POST") {
       const x = await bodyJson<any>(req, env);

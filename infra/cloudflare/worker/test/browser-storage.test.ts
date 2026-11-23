@@ -88,7 +88,8 @@ describe("browser IndexedDB persistence and recovery", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const init = fetchMock.mock.calls[0][1] as RequestInit;
     expect(new Headers(init.headers).get("idempotency-key")).toBeTruthy();
-    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    const bodyBytes = init.body instanceof Uint8Array ? init.body : new Uint8Array(init.body as ArrayBuffer);
+    const body = JSON.parse(new TextDecoder().decode(bodyBytes)) as Record<string, unknown>;
     expect(body).toMatchObject({ payload_ciphertext: "encrypted-content", payload_nonce: "nonce" });
     expect(body).not.toHaveProperty("plaintext");
   });

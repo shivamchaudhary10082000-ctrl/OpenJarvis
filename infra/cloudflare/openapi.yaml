@@ -146,8 +146,7 @@ paths:
                     items:
                       $ref: "#/components/schemas/MemoryRecord"
                   next_cursor:
-                    type: string
-                    nullable: true
+                    type: [string, "null"]
     post:
       summary: Create a pending memory candidate
       parameters:
@@ -431,8 +430,7 @@ paths:
                       fallback_used:
                         type: boolean
                       fallback_reason:
-                        type: string
-                        nullable: true
+                        type: [string, "null"]
                       latency_ms:
                         type: integer
                       account_scope:
@@ -522,6 +520,29 @@ components:
         type: string
         minLength: 16
         maxLength: 128
+  responses:
+    Conflict:
+      description: Revision conflict or idempotency key reused with a different payload.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: string
+              current_revision:
+                type: [integer, "null"]
+    NotFound:
+      description: Resource not found for this account.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: string
   schemas:
     DeviceEnrollment:
       type: object
@@ -554,8 +575,7 @@ components:
         created_at:
           type: integer
         last_seen_at:
-          type: integer
-          nullable: true
+          type: [integer, "null"]
     EncryptedMemoryInput:
       type: object
       required: [memory_id, payload_ciphertext, payload_nonce, key_version]
@@ -589,8 +609,7 @@ components:
             updated_at:
               type: integer
             tombstoned_at:
-              type: integer
-              nullable: true
+              type: [integer, "null"]
     Task:
       type: object
       required: [task_id, state, task_kind]
@@ -602,27 +621,10 @@ components:
         task_kind:
           type: string
         assigned_device_id:
-          type: string
-          nullable: true
+          type: [string, "null"]
         lease_expires_at:
-          type: integer
-          nullable: true
+          type: [integer, "null"]
         created_at:
           type: integer
         updated_at:
           type: integer
-    Conflict:
-      description: Revision conflict or idempotency key reused with a different payload.
-      content:
-        application/json:
-          schema:
-            type: object
-            required: [error]
-            properties:
-              error:
-                type: string
-              current_revision:
-                type: integer
-                nullable: true
-    NotFound:
-      description: Resource not found for this account.

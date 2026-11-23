@@ -114,3 +114,17 @@ The Android API-36 emulator harness had an earlier run where unit tests passed b
 **Token lifecycle gate:** the browser client accepts a caller-supplied access-token callback and does not itself persist tokens. There is no integrated login/refresh/sign-out/recovery provider flow to audit end-to-end. Keep the eventual provider token in memory only, refresh through the identity provider, clear it on sign-out, and revoke the device on account recovery; validate the actual integration before Phase 1 closure.
 
 Phase 1 remains open. No Cloudflare resources were provisioned and no application build was started.
+
+
+## 2026-11-24 current-head reconciliation (supersedes stale pending notes above)
+
+Inspected PR head: `558e547ab888d93fb88cca8cdcf63bd211320229`.
+
+- [NEO Worker run #45248519722](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45248519722) passed OpenAPI lint, TypeScript, Wrangler dry-run, **50 Vitest tests**, and native Playwright IndexedDB tests **9/9** across Chromium, Firefox and WebKit.
+- [Repository CI #45248520038](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45248520038) passed, including Python 3.11/3.12 suites (10,037 passed / 72 skipped each), Rust workspace, Windows 3.12/3.13, lint, Bandit, Semgrep, Python dependency audit and both Rust advisory jobs. The desktop `cookie 0.18.3` lockfile change is therefore clear of the checked advisory gate on this head; the separate Windows ARM64 test-installer build was still running.
+- The scheduled stale-spend reconciler is now present and covered by the 50-test Worker suite. It settles stale reservations conservatively at their full reserved USD/token ceilings; anomalous over-reservation still requires operator investigation.
+- Android Gradle unit tests passed, but the API-36 emulator instrumentation job was still running. No physical-device result is claimed.
+- Browser authentication and hosting are now recorded in [browser-auth-hosting-decision.md](browser-auth-hosting-decision.md). The actual NEO hostname, Access application, browser sign-in provider, CORS/route topology and response-header host remain unconfigured. The browser token callback is host-supplied; no login/refresh/sign-out provider is integrated.
+- A focused test was added to verify that the host token callback is called for each request and that returned tokens are not persisted in IndexedDB. Its result is pending the next CI run.
+
+No Cloudflare resources, production systems, DNS or provider credentials were changed. Phase 1 remains open.

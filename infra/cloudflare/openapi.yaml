@@ -379,6 +379,14 @@ paths:
                 allow_fallback:
                   type: boolean
                   default: true
+                max_tokens:
+                  type: integer
+                  minimum: 1
+                  description: Per-request output-token maximum; must not exceed the server MAX_OUTPUT_TOKENS.
+                max_completion_tokens:
+                  type: integer
+                  minimum: 1
+                  description: Alternative provider-compatible output-token maximum.
                 messages:
                   type: array
                   items:

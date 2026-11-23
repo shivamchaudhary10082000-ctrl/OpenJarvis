@@ -30,8 +30,8 @@ This report separates source implementation from tested behavior and from produc
 
 Latest NEO Worker run at the time of this report:
 
-- Workflow run #87: **Success**
-- Tested commit: 2297ddfd492410047fc2ea4ed8e9675b615ec25f
+- Workflow run #89: **Success**
+- Tested commit: dfefe0f73fabde29bac8d7fe086afd10dc5e8bd3
 - npm install --ignore-scripts: passed; npm reported 0 vulnerabilities.
 - npm run check: passed.
 - npm test: passed.
@@ -69,7 +69,7 @@ Input-token reservation uses serialized request bytes as a conservative upper bo
 1. **Staging and operational validation:** No Cloudflare account resources have been provisioned; remote D1 migration rehearsal, staging deployment, rollback, restore and deletion tests remain.
 2. **Real provider compatibility:** All provider/voice integration tests use mocks. Test real provider error formats, timeouts, malformed/missing usage, voice duration pricing and backup independence after credentials and budget are approved.
 3. **Budget operations:** Pricing is manually configured and can drift. Add a documented pricing review/update process, budget dashboard/alerts, reservation reconciliation and operator audit trail. Current caps are per account, not a global shared-provider-key ceiling.
-4. **Offline behavior:** Web/Android cache and outbox are source implemented, but browser IndexedDB and Android SQLite behavior have not been exercised on real devices. Account-scoped namespaces and tombstone-aware reads are source implemented; native persistence still needs runtime tests. Outbox flush is caller-driven; no automatic background scheduler/backoff exists.
+4. **Offline behavior:** Web/Android cache and outbox are source implemented, but browser IndexedDB and Android SQLite behavior have not been exercised on real devices. Account-scoped namespaces and tombstone-aware reads are source implemented; native persistence still needs runtime tests. Server-side revocation cannot remotely wipe a disconnected device or revoke its local memory-decryption key. Outbox flush is caller-driven; no automatic background scheduler/backoff exists.
 5. **Local inference fallback:** Not implemented. Offline mode currently provides encrypted cached memory and queued writes/tasks, not an equivalent local AI model.
 6. **Browser security:** Add strict CSP, dependency/XSS controls, secure Access-token lifecycle, persistence/recovery tests and device re-enrolment flow.
 7. **Native app integration:** Android code is a transport/storage primitive, not a built application. No Gradle app/test project, Access login UI, microphone permission UX, background worker or real-device test exists. iOS and desktop integrations are absent.

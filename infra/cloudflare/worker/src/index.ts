@@ -21,7 +21,7 @@ const b64u = (s: string) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_
 export function encodeBytesBase64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/=/g, "").replace(/\\+/g, "-").replace(/\\//g, "_");
+  return btoa(binary).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 }
 
 const enc = new TextEncoder();

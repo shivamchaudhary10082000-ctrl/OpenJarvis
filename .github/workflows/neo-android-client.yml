@@ -1,0 +1,50 @@
+name: NEO Android client harness
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "infra/cloudflare/clients/android/**"
+      - "infra/cloudflare/clients/android-test-harness/**"
+      - ".github/workflows/neo-android-client.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android-unit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/cloudflare/clients/android-test-harness
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: "8.13"
+      - run: gradle testDebugUnitTest
+  android-instrumented:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/cloudflare/clients/android-test-harness
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: "8.13"
+      - run: sdkmanager "platform-tools" "platforms;android-36" "system-images;android-36;google_apis;x86_64"
+      - run: echo "no" | avdmanager create avd --name neo-api-36 --package "system-images;android-36;google_apis;x86_64" --device "pixel_2"
+      - run: |
+          nohup emulator -avd neo-api-36 -no-window -no-audio -no-boot-anim &
+          adb wait-for-device
+          adb shell 'while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 2; done'
+      - run: gradle connectedDebugAndroidTest

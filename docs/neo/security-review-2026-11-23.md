@@ -1,7 +1,7 @@
 # NEO security and integration review
 
 **Review date:** 2026-11-23  
-**Reviewed revision:** `aaa2c024a6e3685cabaab9ad7244ae63741a85df`  
+**Reviewed revision:** `fe162cc4a5816d625d03fbd451a384f71459cadf`  
 **Scope:** Repository-level review of the initial Cloudflare Worker, D1 schema, memory trust path, and client integration primitives.
 
 This is an engineering review of the checked-in source, not a third-party penetration test, Cloudflare deployment assessment, or production security certification. No live account, provider credential, D1 database, or device was accessed.
@@ -42,17 +42,17 @@ Memory creation reads `MAX(revision)+1` and then inserts in a separate statement
 
 **Required remediation:** Make revision allocation atomic (for example, a D1 batch/transaction with a guarded insert strategy) and return a stable 409 conflict on contention. Add concurrent integration tests.
 
-### Medium — Provider tier metadata is derived from the candidate array index
+### Medium — Provider tier metadata was derived from the candidate array index (patched; CI pending)
 
-The model router calculates `tier` and fallback metadata from the loop index. When a user explicitly selects the configured backup provider, that provider becomes candidate index zero and is reported as `primary`, despite being the backup. This is an observability and user-disclosure correctness defect.
+The model router previously calculated `tier` and fallback metadata from the loop index. An explicitly selected backup provider became candidate index zero and was incorrectly reported as `primary`.
 
-**Required remediation:** Derive the provider tier from provider identity, and derive `fallback_used` from whether automatic routing actually moved from the configured primary. Add explicit-backup and automatic-fallback tests.
+**Patch in this revision:** Route metadata is now derived from provider identity and whether automatic routing actually moved from an available primary. Focused tests cover explicit backup selection, automatic failover, and backup-only configuration. These tests have not yet been executed by GitHub Actions on the updated PR head.
 
 ## Memory sync pagination fix in this revision
 
 The previous cursor used only `(updated_at, memory_id)`. Multiple immutable revisions can share the same second and memory ID, so a page boundary could skip rows. New writes inserted during pagination could also collide with the timestamp-based ordering.
 
-The Worker now uses the D1 implicit `rowid` of the append-only `memory_records` table as its opaque keyset cursor, returning records in insertion order. Cursor encode/decode validation has focused unit tests. This is not yet a D1 integration test; the assumption that memory rows are append-only must remain true. A database rebuild/restore that changes rowids must trigger a full client resynchronisation.
+The Worker now uses the D1 implicit `rowid` of the append-only `memory_records` table as its opaque keyset cursor, returning records in insertion order. Cursor encode/decode validation has focused unit tests. This is not yet a D1 integration test; the assumption that memory rows are append-only must remain true. A database rebuild/restore that changes rowids must trigger a full client resynchronisation. GitHub Actions has not produced a check run for the updated PR head yet, so compilation and tests remain unverified for this patch.
 
 ## Staging gate
 

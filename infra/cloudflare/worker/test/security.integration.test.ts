@@ -618,6 +618,59 @@ describe("D1 spend ledger invariants", () => {
     expect(usage).toMatchObject({ reserved_microusd: 1000, spent_microusd: 0 });
   });
 
+  it("admits only concurrent output-token reservations that fit the monthly token budget", async () => {
+    const account = "token-race-" + crypto.randomUUID();
+    const month = new Date().toISOString().slice(0, 7);
+    const timestamp = Math.floor(Date.now() / 1000);
+    await bindings.DB.prepare(
+      "INSERT INTO accounts(account_id, created_at, status) VALUES(?, ?, 'active')",
+    ).bind(account, timestamp).run();
+    await bindings.DB.prepare(
+      "INSERT INTO provider_spend_usage(account_id,month_key,budget_microusd,monthly_input_token_limit,monthly_output_token_limit,reserved_microusd,spent_microusd,reserved_input_tokens,reserved_output_tokens,input_tokens,output_tokens,updated_at) VALUES(?,?,10000,1000,1000,0,0,0,0,0,0,?)",
+    ).bind(account, month, timestamp).run();
+
+    const attempts = await Promise.all(Array.from({ length: 10 }, (_, index) =>
+      bindings.DB.prepare(
+        "INSERT INTO provider_spend_reservations(reservation_id,account_id,month_key,reserved_microusd,reserved_input_tokens,reserved_output_tokens,state,provider_label,created_at) VALUES(?,?,?,100,10,200,'reserved',?,?)",
+      ).bind(crypto.randomUUID(), account, month, "token-race-" + index, timestamp).run()
+        .then(() => true)
+        .catch(() => false),
+    ));
+    expect(attempts.filter(Boolean)).toHaveLength(5);
+    const usage = await bindings.DB.prepare(
+      "SELECT reserved_input_tokens,reserved_output_tokens,input_tokens,output_tokens FROM provider_spend_usage WHERE account_id=? AND month_key=?",
+    ).bind(account, month).first<{ reserved_input_tokens: number; reserved_output_tokens: number; input_tokens: number; output_tokens: number }>();
+    expect(usage).toMatchObject({ reserved_input_tokens: 50, reserved_output_tokens: 1000, input_tokens: 0, output_tokens: 0 });
+  });
+
+  it("rejects token settlement above the reservation and settles within the reserved token counts", async () => {
+    const account = "token-settle-" + crypto.randomUUID();
+    const month = new Date().toISOString().slice(0, 7);
+    const timestamp = Math.floor(Date.now() / 1000);
+    await bindings.DB.prepare(
+      "INSERT INTO accounts(account_id, created_at, status) VALUES(?, ?, 'active')",
+    ).bind(account, timestamp).run();
+    await bindings.DB.prepare(
+      "INSERT INTO provider_spend_usage(account_id,month_key,budget_microusd,monthly_input_token_limit,monthly_output_token_limit,reserved_microusd,spent_microusd,reserved_input_tokens,reserved_output_tokens,input_tokens,output_tokens,updated_at) VALUES(?,?,10000,1000,1000,0,0,0,0,0,0,?)",
+    ).bind(account, month, timestamp).run();
+    const reservation = crypto.randomUUID();
+    await bindings.DB.prepare(
+      "INSERT INTO provider_spend_reservations(reservation_id,account_id,month_key,reserved_microusd,reserved_input_tokens,reserved_output_tokens,state,provider_label,created_at) VALUES(?,?,?,300,10,20,'reserved','token-settlement-test',?)",
+    ).bind(reservation, account, month, timestamp).run();
+
+    await expect(bindings.DB.prepare(
+      "UPDATE provider_spend_reservations SET state='settled',settled_microusd=250,settled_input_tokens=11,settled_output_tokens=20,settled_at=? WHERE reservation_id=?",
+    ).bind(timestamp, reservation).run()).rejects.toThrow(/token_settlement_exceeds_reservation/);
+
+    await bindings.DB.prepare(
+      "UPDATE provider_spend_reservations SET state='settled',settled_microusd=250,settled_input_tokens=10,settled_output_tokens=15,settled_at=? WHERE reservation_id=?",
+    ).bind(timestamp, reservation).run();
+    const usage = await bindings.DB.prepare(
+      "SELECT reserved_input_tokens,reserved_output_tokens,input_tokens,output_tokens FROM provider_spend_usage WHERE account_id=? AND month_key=?",
+    ).bind(account, month).first<{ reserved_input_tokens: number; reserved_output_tokens: number; input_tokens: number; output_tokens: number }>();
+    expect(usage).toMatchObject({ reserved_input_tokens: 0, reserved_output_tokens: 0, input_tokens: 10, output_tokens: 15 });
+  });
+
   it("rejects settlement above the reservation and accepts settlement within it", async () => {
     const account = "spend-settle-" + crypto.randomUUID();
     const month = new Date().toISOString().slice(0, 7);

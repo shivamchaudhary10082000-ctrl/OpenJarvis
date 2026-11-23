@@ -25,11 +25,12 @@ class NeoAndroidClient(
     context: Context,
     private val baseUrl: String,
     private val accessToken: suspend () -> String,
-    private val identity: NeoDeviceIdentity = NeoDeviceIdentity(),
+    accountScope: String,
+    private val identity: NeoDeviceIdentity = NeoDeviceIdentity("neo-device-p256-${neoAccountScopeHash(accountScope)}"),
     private val http: OkHttpClient = OkHttpClient(),
-    private val offlineStore: NeoOfflineStore = NeoOfflineStore(context)
+    private val offlineStore: NeoOfflineStore = NeoOfflineStore(context, accountScope)
 ) {
-    private val prefs = context.getSharedPreferences("neo_device", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences("neo_device_${neoAccountScopeHash(accountScope)}", Context.MODE_PRIVATE)
     val deviceId: String = prefs.getString("device_id", null) ?: UUID.randomUUID().toString().replace("-", "").also {
         prefs.edit().putString("device_id", it).apply()
     }

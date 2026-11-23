@@ -76,7 +76,7 @@ async function cacheMemory(records:Record<string,unknown>[],namespace:string):Pr
     await transactionDone(tx);
   }finally{db.close();}
 }
-async function readCachedMemory(includePending=false):Promise<Record<string,unknown>[]>{
+async function readCachedMemory(includePending=false,namespace:string):Promise<Record<string,unknown>[]>{
   const db=await openDb();
   try{
     const rows=await new Promise<CachedMemory[]>((resolve,reject)=>{

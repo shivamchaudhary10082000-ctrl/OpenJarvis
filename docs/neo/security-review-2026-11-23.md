@@ -20,7 +20,7 @@ This is not a third-party penetration test, production certification, remote D1 
 - Task idempotency, capability-aware claims, concurrent lease race and expired-lease recovery.
 - Atomic monthly spend reservations, concurrent reservation cap, settlement guard and monthly token-budget reservations.
 - Primary/backup failover, explicit model no-fallback, allow_fallback=false, provider network failure and mocked voice transcription/synthesis.
-- CI run #87 passed on commit 2297ddfd492410047fc2ea4ed8e9675b615ec25f: Redocly OpenAPI lint, TypeScript check, Wrangler deployment dry-run and 43 tests.
+- CI run #89 passed on commit dfefe0f73fabde29bac8d7fe086afd10dc5e8bd3: Redocly OpenAPI lint, TypeScript check, Wrangler deployment dry-run and 43 tests.
 
 ## Residual findings
 

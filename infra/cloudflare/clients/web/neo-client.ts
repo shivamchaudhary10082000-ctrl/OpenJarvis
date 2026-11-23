@@ -77,7 +77,7 @@ async function cacheMemory(records:Record<string,unknown>[],scopeKey:string):Pro
     await transactionDone(tx);
   }finally{db.close();}
 }
-async function readCachedMemory(includePending=false,scopeKey:string):Promise<Record<string,unknown>[]>{
+async function readCachedMemory(includePending:boolean,scopeKey:string):Promise<Record<string,unknown>[]>{
   const db=await openDb();
   try{
     const rows=await new Promise<CachedMemory[]>((resolve,reject)=>{
@@ -157,16 +157,16 @@ export class NeoDeviceClient {
     return {status:"queued_offline",kind,idempotency_key:idempotencyKey,queued_at:item.createdAt};
   }
   async syncMemory(cursor?:string,includePending=false){
-    const activeCursor=cursor??await loadCursor(this.deviceId);
+    const activeCursor=cursor??await loadCursor(this.scopeKey);
     const q=new URLSearchParams(); if(activeCursor)q.set("cursor",activeCursor); if(includePending)q.set("include_pending","true");
     let response:Response;
     try{response=await this.request("/memory?"+q.toString());}
-    catch{return {records:await readCachedMemory(includePending,this.deviceId),next_cursor:activeCursor??null,offline:true};}
+    catch{return {records:await readCachedMemory(includePending,this.scopeKey),next_cursor:activeCursor??null,offline:true};}
     if(!response.ok)throw new Error("Memory sync failed: "+response.status);
     const payload=await response.json() as {records?:Record<string,unknown>[];next_cursor?:string|null};
     const records=payload.records||[];
-    await cacheMemory(records,this.deviceId);
-    if(payload.next_cursor)await saveCursor(payload.next_cursor,this.deviceId);
+    await cacheMemory(records,this.scopeKey);
+    if(payload.next_cursor)await saveCursor(payload.next_cursor,this.scopeKey);
     return {...payload,offline:false};
   }
   async getCachedMemory(includePending=false){return readCachedMemory(includePending,this.deviceId);}

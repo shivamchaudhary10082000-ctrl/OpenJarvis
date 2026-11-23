@@ -20,5 +20,8 @@
     "test/**/*.ts",
     "../clients/web/**/*.ts",
     "vitest.config.ts"
+  ],
+  "exclude": [
+    "test/native-browser/**"
   ]
 }

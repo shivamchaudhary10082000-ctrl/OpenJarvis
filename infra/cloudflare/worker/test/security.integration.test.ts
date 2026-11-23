@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "cloudflare:workers";
-import worker, { type Env } from "../src/index";
+import worker, { cleanupExpiredDeviceNonces, type Env } from "../src/index";
 
 const encoder = new TextEncoder();
 const bindings = env as unknown as Env;
@@ -262,6 +262,21 @@ describe("D1-backed Access and device proof", () => {
 
     const revokedRequest = await call(secondary, "/v1/devices");
     expect(revokedRequest.status).toBe(403);
+  });
+
+  it("cleans expired device nonces while preserving live replay records", async () => {
+    const device = await enrolDevice("nonce-cleanup-" + crypto.randomUUID(), "Nonce cleanup device");
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    await bindings.DB.prepare("INSERT INTO device_nonces(device_id,nonce,expires_at) VALUES(?,?,?)")
+      .bind(device.id, "expired-nonce-123456", nowSeconds - 1).run();
+    await bindings.DB.prepare("INSERT INTO device_nonces(device_id,nonce,expires_at) VALUES(?,?,?)")
+      .bind(device.id, "live-nonce-123456789", nowSeconds + 600).run();
+
+    const removed = await cleanupExpiredDeviceNonces(bindings);
+    expect(removed).toBe(1);
+    const remaining = await bindings.DB.prepare("SELECT nonce FROM device_nonces WHERE device_id=?")
+      .bind(device.id).all<{ nonce: string }>();
+    expect(remaining.results.map(row => row.nonce)).toEqual(["live-nonce-123456789"]);
   });
 
   it("enforces the D1-backed per-account fixed-window request limit", async () => {

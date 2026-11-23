@@ -77,6 +77,24 @@ async function cacheMemory(records:Record<string,unknown>[],scopeKey:string):Pro
     await transactionDone(tx);
   }finally{db.close();}
 }
+export function selectRecallableMemory(records:Record<string,unknown>[],includePending=false):Record<string,unknown>[] {
+  const groups=new Map<string,Record<string,unknown>[]>();
+  for(const record of records){
+    if(typeof record.memory_id!=="string"||typeof record.revision!=="number")continue;
+    const group=groups.get(record.memory_id)||[];
+    group.push(record);
+    groups.set(record.memory_id,group);
+  }
+  const selected:Record<string,unknown>[]=[];
+  for(const group of groups.values()){
+    const durable=group.filter(record=>record.trust_state==="approved"||record.trust_state==="deleted")
+      .sort((a,b)=>Number(b.revision)-Number(a.revision));
+    if(durable[0]?.trust_state==="approved")selected.push(durable[0]);
+    if(includePending)selected.push(...group.filter(record=>record.trust_state==="pending"));
+  }
+  return selected.sort((a,b)=>Number(a.updated_at||0)-Number(b.updated_at||0));
+}
+
 async function readCachedMemory(includePending:boolean,scopeKey:string):Promise<Record<string,unknown>[]>{
   const db=await openDb();
   try{
@@ -84,8 +102,10 @@ async function readCachedMemory(includePending:boolean,scopeKey:string):Promise<
       const r=db.transaction("memory_cache","readonly").objectStore("memory_cache").getAll();
       r.onsuccess=()=>resolve(r.result as CachedMemory[]);r.onerror=()=>reject(r.error);
     });
-    return rows.filter(row=>row.key.startsWith(scopeKey+":")).map(row=>row.record).filter(record=>includePending||record.trust_state==="approved"||record.trust_state==="deleted")
-      .sort((a,b)=>Number(a.updated_at||0)-Number(b.updated_at||0));
+    return selectRecallableMemory(
+      rows.filter(row=>row.key.startsWith(scopeKey+":")).map(row=>row.record),
+      includePending,
+    );
   }finally{db.close();}
 }
 async function saveCursor(cursor:string|null,scopeKey:string):Promise<void>{

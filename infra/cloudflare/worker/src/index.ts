@@ -183,17 +183,23 @@ async function accessClaims(token: string, env: Env): Promise<Claims> {
   if (claims.iss !== issuer || !aud.includes(env.ACCESS_AUD) || !claims.sub || claims.exp <= now()) throw new Error("Invalid access token claims");
   return claims;
 }
-async function authenticate(req: Request, env: Env): Promise<{ account: string; device: Device }> {
-  // Cloudflare Access injects this signed assertion after authenticating browser
-  // sessions. Native/controlled clients may continue to use the bearer contract.
-  // Both paths go through the same signature, issuer, audience and expiry checks.
-  const accessAssertion = req.headers.get("cf-access-jwt-assertion");
+function accessTokenFromRequest(req: Request): string {
+  // Cloudflare Access injects this signed assertion for protected browser
+  // requests. If present, it is authoritative even when empty or invalid.
+  const assertion = req.headers.get("cf-access-jwt-assertion");
+  if (assertion !== null) return assertion.trim();
   const authorization = req.headers.get("authorization") || "";
-  const token = accessAssertion !== null
-    ? accessAssertion.trim()
-    : authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+  return authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+}
+async function accessClaimsFromRequest(req: Request, env: Env): Promise<Claims> {
+  const token = accessTokenFromRequest(req);
   if (!token) throw new Error("Missing Cloudflare Access token");
-  const claims = await accessClaims(token, env);
+  return accessClaims(token, env);
+}
+async function authenticate(req: Request, env: Env): Promise<{ account: string; device: Device }> {
+  // Browser assertions and native/controlled bearer tokens share the exact
+  // same RS256, issuer, audience and expiry validation.
+  const claims = await accessClaimsFromRequest(req, env);
   const account = claims.sub;
   await env.DB.prepare("INSERT OR IGNORE INTO accounts(account_id, created_at, status) VALUES(?, ?, 'active')").bind(account, now()).run();
   const accountRow = await env.DB.prepare("SELECT status FROM accounts WHERE account_id = ?").bind(account).first<{status:string}>();
@@ -252,9 +258,9 @@ async function route(req: Request, env: Env): Promise<Response> {
   // First enrolment uses Access identity and binds a client-generated P-256 key.
   if (path === "/devices" && req.method === "POST") {
     try {
-      const bearer = (req.headers.get("authorization") || "").replace(/^Bearer /, "");
-      if (!bearer) return fail(401, "unauthorized", "Missing Cloudflare Access bearer token");
-      const claims = await accessClaims(bearer, env);
+      // First enrolment must support the same cookie/assertion browser flow as
+      // every subsequent signed request. A present invalid assertion fails closed.
+      const claims = await accessClaimsFromRequest(req, env);
       const x = await bodyJson<any>(req, env);
       const deviceId = req.headers.get("x-neo-device-id") || "";
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(deviceId) || typeof x.label !== "string" ||

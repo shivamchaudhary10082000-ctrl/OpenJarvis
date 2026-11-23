@@ -103,25 +103,50 @@ describe("browser IndexedDB persistence and recovery", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get("authorization")).toBeNull();
+    expect(fetchMock.mock.calls[0][1]?.credentials).toBe("same-origin");
   });
 
-  it("uses a fresh host-provided access token per request without persisting it", async () => {
+  it("uses same-origin Access cookies for first device enrolment without a JavaScript bearer token", async () => {
+    const client = await NeoDeviceClient.create("https://neo.test", undefined, account());
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ status: "enrolled" }),
+      { status: 201, headers: { "content-type": "application/json" } },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await client.enrol("Browser cookie device", "browser");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.credentials).toBe("same-origin");
+    expect(new Headers(init.headers).get("authorization")).toBeNull();
+  });
+
+  it("uses a fresh host-provided access token for enrolment and every request without persisting it", async () => {
     const scope = account();
     let issued = 0;
     const accessToken = async () => `ephemeral-access-token-${++issued}`;
     const client = await NeoDeviceClient.create("https://neo.test", accessToken, scope);
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response("{}", { status: 200 }));
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: "enrolled" }), {
+        status: 201,
+        headers: { "content-type": "application/json" },
+      }))
+      .mockResolvedValue(new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
+    await client.enrol("Browser token device", "browser");
     await client.request("/health");
     await client.request("/health");
 
-    expect(issued).toBe(2);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(issued).toBe(3);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get("authorization"))
       .toBe("Bearer ephemeral-access-token-1");
     expect(new Headers(fetchMock.mock.calls[1][1]?.headers).get("authorization"))
       .toBe("Bearer ephemeral-access-token-2");
+    expect(new Headers(fetchMock.mock.calls[2][1]?.headers).get("authorization"))
+      .toBe("Bearer ephemeral-access-token-3");
 
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open("neo-device-identity", 2);

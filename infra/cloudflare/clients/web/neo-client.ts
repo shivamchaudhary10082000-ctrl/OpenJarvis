@@ -152,7 +152,7 @@ export class NeoDeviceClient {
   async enrol(label:string,platform:DevicePlatform,capabilities:string[]=[]){
     const headers=new Headers({"content-type":"application/json","x-neo-device-id":this.deviceId});
     if(this.accessToken)headers.set("authorization","Bearer "+await this.accessToken());
-    const response=await fetch(this.baseUrl+"/v1/devices",{method:"POST",headers,body:JSON.stringify({label,platform,public_key_jwk:this.identity.publicJwk,capabilities})});
+    const response=await fetch(this.baseUrl+"/v1/devices",{method:"POST",headers,body:JSON.stringify({label,platform,public_key_jwk:this.identity.publicJwk,capabilities}),credentials:"same-origin"});
     if(!response.ok) throw new Error("NEO device enrolment failed: "+response.status);
     return response.json();
   }
@@ -169,7 +169,7 @@ export class NeoDeviceClient {
     headers.set("x-neo-device-id",this.deviceId); headers.set("x-neo-timestamp",String(ts));
     headers.set("x-neo-nonce",nonce); headers.set("x-neo-signature",toB64u(signature));
     if(body.byteLength && !headers.has("content-type")) headers.set("content-type","application/json");
-    return fetch(url,{...init,method,headers,body:body.byteLength?body:undefined});
+    return fetch(url,{...init,method,headers,body:body.byteLength?body:undefined,credentials:init.credentials??"same-origin"});
   }
   private async enqueue(kind:OutboxItem["kind"],path:string,body:string,idempotencyKey:string){
     const item:OutboxItem={

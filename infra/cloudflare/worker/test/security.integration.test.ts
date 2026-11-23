@@ -225,6 +225,67 @@ describe("D1-backed Access and device proof", () => {
     expect((await worker.fetch(invalidAssertionRequest, bindings)).status).toBe(401);
   });
 
+  it("supports first browser-device enrolment through the Access assertion and fails closed on an invalid assertion", async () => {
+    const account = "browser-cookie-enrolment-" + crypto.randomUUID();
+    const pair = await crypto.subtle.generateKey(
+      { name: "ECDSA", namedCurve: "P-256" },
+      true,
+      ["sign", "verify"],
+    );
+    const publicJwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
+    const deviceId = crypto.randomUUID().replace(/-/g, "");
+    const token = await accessToken(account);
+    const response = await worker.fetch(new Request(baseUrl + "/v1/devices", {
+      method: "POST",
+      headers: {
+        "cf-access-jwt-assertion": token,
+        "content-type": "application/json",
+        "x-neo-device-id": deviceId,
+      },
+      body: JSON.stringify({
+        label: "Browser cookie device",
+        platform: "browser",
+        public_key_jwk: publicJwk,
+        capabilities: ["cpu"],
+      }),
+    }), bindings);
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({
+      device_id: deviceId,
+      account_id: account,
+      status: "enrolled",
+    });
+
+    const rejectedDeviceId = crypto.randomUUID().replace(/-/g, "");
+    const fallbackBearer = await accessToken("invalid-assertion-enrolment-" + crypto.randomUUID());
+    const rejectedPair = await crypto.subtle.generateKey(
+      { name: "ECDSA", namedCurve: "P-256" },
+      true,
+      ["sign", "verify"],
+    );
+    const rejectedPublicJwk = await crypto.subtle.exportKey("jwk", rejectedPair.publicKey);
+    const rejected = await worker.fetch(new Request(baseUrl + "/v1/devices", {
+      method: "POST",
+      headers: {
+        "cf-access-jwt-assertion": "invalid.assertion.value",
+        authorization: "Bearer " + fallbackBearer,
+        "content-type": "application/json",
+        "x-neo-device-id": rejectedDeviceId,
+      },
+      body: JSON.stringify({
+        label: "Must not enrol",
+        platform: "browser",
+        public_key_jwk: rejectedPublicJwk,
+        capabilities: ["cpu"],
+      }),
+    }), bindings);
+    expect(rejected.status).toBe(401);
+    const rejectedRow = await bindings.DB.prepare(
+      "SELECT device_id FROM devices WHERE device_id = ?",
+    ).bind(rejectedDeviceId).first();
+    expect(rejectedRow).toBeNull();
+  });
+
   it("rejects first-time device enrolment for a suspended account", async () => {
     const account = "suspended-enrolment-" + crypto.randomUUID();
     await bindings.DB.prepare(

@@ -9,6 +9,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.io.IOException
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.UUID
@@ -25,7 +26,8 @@ class NeoAndroidClient(
     private val baseUrl: String,
     private val accessToken: suspend () -> String,
     private val identity: NeoDeviceIdentity = NeoDeviceIdentity(),
-    private val http: OkHttpClient = OkHttpClient()
+    private val http: OkHttpClient = OkHttpClient(),
+    private val offlineStore: NeoOfflineStore = NeoOfflineStore(context)
 ) {
     private val prefs = context.getSharedPreferences("neo_device", Context.MODE_PRIVATE)
     val deviceId: String = prefs.getString("device_id", null) ?: UUID.randomUUID().toString().replace("-", "").also {
@@ -54,7 +56,13 @@ class NeoAndroidClient(
         return withContext(Dispatchers.IO) { http.newCall(request).execute() }
     }
 
-    suspend fun signedRequest(method: String, pathAndQuery: String, body: ByteArray = ByteArray(0), contentType: String? = null): okhttp3.Response {
+    suspend fun signedRequest(
+        method: String,
+        pathAndQuery: String,
+        body: ByteArray = ByteArray(0),
+        contentType: String? = null,
+        extraHeaders: Map<String, String> = emptyMap()
+    ): okhttp3.Response {
         require(pathAndQuery.startsWith("/")) { "Path must be absolute" }
         val url = baseUrl.trimEnd('/') + "/v1" + pathAndQuery
         val parsed = java.net.URL(url)
@@ -71,6 +79,7 @@ class NeoAndroidClient(
             .header("X-NEO-Timestamp", timestamp.toString())
             .header("X-NEO-Nonce", nonce)
             .header("X-NEO-Signature", signature)
+        extraHeaders.forEach { (name, value) -> builder.header(name, value) }
         val media = (contentType ?: "application/octet-stream").toMediaType()
         when (method.uppercase()) {
             "GET" -> builder.get()
@@ -82,14 +91,98 @@ class NeoAndroidClient(
         return withContext(Dispatchers.IO) { http.newCall(builder.build()).execute() }
     }
 
-    suspend fun syncApprovedMemory(cursor: String? = null): okhttp3.Response {
-        val query = cursor?.let { "?cursor=" + java.net.URLEncoder.encode(it, "UTF-8") } ?: ""
-        return signedRequest("GET", "/memory$query")
+    suspend fun syncApprovedMemory(cursor: String? = null): JSONObject {
+        val activeCursor = cursor ?: offlineStore.loadCursor()
+        val query = activeCursor?.let { "?cursor=" + java.net.URLEncoder.encode(it, "UTF-8") } ?: ""
+        val response = try {
+            signedRequest("GET", "/memory$query")
+        } catch (error: IOException) {
+            return JSONObject()
+                .put("records", offlineStore.cachedApprovedMemory())
+                .put("next_cursor", activeCursor)
+                .put("offline", true)
+        }
+        response.use {
+            if (!it.isSuccessful) throw IllegalStateException("Memory sync failed: ${it.code}")
+            val payload = JSONObject(it.body?.string() ?: "{}")
+            offlineStore.cacheMemory(payload.optJSONArray("records") ?: org.json.JSONArray())
+            val next = payload.optString("next_cursor", "")
+            if (next.isNotEmpty()) offlineStore.saveCursor(next)
+            payload.put("offline", false)
+            return payload
+        }
     }
+
+    suspend fun createEncryptedMemory(jsonBody: String, idempotencyKey: String = UUID.randomUUID().toString().replace("-", "")): JSONObject {
+        val headers = mapOf("Idempotency-Key" to idempotencyKey, "Content-Type" to "application/json")
+        val response = try {
+            signedRequest("POST", "/memory", jsonBody.toByteArray(), "application/json", headers)
+        } catch (error: IOException) {
+            val id = offlineStore.enqueue("memory.create", "/memory", idempotencyKey, jsonBody)
+            return JSONObject().put("status", "queued_offline").put("outbox_id", id).put("idempotency_key", idempotencyKey)
+        }
+        response.use {
+            if (it.isSuccessful) return JSONObject(it.body?.string() ?: "{}")
+            if (it.code == 408 || it.code == 425 || it.code == 429 || it.code >= 500) {
+                val id = offlineStore.enqueue("memory.create", "/memory", idempotencyKey, jsonBody)
+                return JSONObject().put("status", "queued_offline").put("outbox_id", id).put("idempotency_key", idempotencyKey)
+            }
+            throw IllegalStateException("Memory write failed: ${it.code}")
+        }
+    }
+
+    suspend fun queueEncryptedTask(jsonBody: String, idempotencyKey: String = UUID.randomUUID().toString().replace("-", "")): JSONObject {
+        val headers = mapOf("Idempotency-Key" to idempotencyKey, "Content-Type" to "application/json")
+        val response = try {
+            signedRequest("POST", "/tasks", jsonBody.toByteArray(), "application/json", headers)
+        } catch (error: IOException) {
+            val id = offlineStore.enqueue("task.enqueue", "/tasks", idempotencyKey, jsonBody)
+            return JSONObject().put("status", "queued_offline").put("outbox_id", id).put("idempotency_key", idempotencyKey)
+        }
+        response.use {
+            if (it.isSuccessful) return JSONObject(it.body?.string() ?: "{}")
+            if (it.code == 408 || it.code == 425 || it.code == 429 || it.code >= 500) {
+                val id = offlineStore.enqueue("task.enqueue", "/tasks", idempotencyKey, jsonBody)
+                return JSONObject().put("status", "queued_offline").put("outbox_id", id).put("idempotency_key", idempotencyKey)
+            }
+            throw IllegalStateException("Task enqueue failed: ${it.code}")
+        }
+    }
+
+    suspend fun flushOutbox(): JSONObject {
+        var sent = 0
+        var blockedOn: String? = null
+        for (item in offlineStore.pending()) {
+            val response = try {
+                signedRequest(
+                    "POST", item.path, item.body.toByteArray(), "application/json",
+                    mapOf("Idempotency-Key" to item.idempotencyKey, "Content-Type" to "application/json")
+                )
+            } catch (error: IOException) {
+                blockedOn = item.id
+                break
+            }
+            response.use {
+                if (it.isSuccessful) {
+                    offlineStore.remove(item.id)
+                    sent++
+                } else {
+                    blockedOn = item.id
+                    break
+                }
+            }
+        }
+        return JSONObject()
+            .put("sent", sent)
+            .put("remaining", offlineStore.pending().size)
+            .put("blocked_on", blockedOn)
+    }
+
+    suspend fun claimTask(leaseSeconds: Int = 90): okhttp3.Response =
+        signedRequest("POST", "/tasks/claim", JSONObject().put("lease_seconds", leaseSeconds).toString().toByteArray(), "application/json")
 
     suspend fun transcribe(audio: ByteArray, mimeType: String = "audio/webm"): okhttp3.Response =
         signedRequest("POST", "/voice/transcribe", audio, mimeType)
-
 
     suspend fun synthesize(jsonBody: String): okhttp3.Response =
         signedRequest("POST", "/voice/synthesize", jsonBody.toByteArray(), "application/json")

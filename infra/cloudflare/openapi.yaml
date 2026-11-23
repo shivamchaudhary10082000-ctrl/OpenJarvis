@@ -51,7 +51,6 @@ paths:
       summary: Enrol a device public key
       parameters:
         - $ref: "#/components/parameters/DeviceId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -79,7 +78,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Device"
+                $ref: "#/components/schemas/DeviceEnrollment"
         "409":
           $ref: "#/components/responses/Conflict"
   /devices/{deviceId}:
@@ -133,7 +132,6 @@ paths:
       summary: Create a pending memory candidate
       parameters:
         - $ref: "#/components/parameters/DeviceId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -165,7 +163,6 @@ paths:
           description: Expected current revision; stale approvals are rejected.
           schema:
             type: string
-        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: Memory promoted to approved
@@ -256,7 +253,6 @@ paths:
       summary: Generate a response using the server-side model router
       parameters:
         - $ref: "#/components/parameters/DeviceId"
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -337,6 +333,16 @@ components:
         minLength: 16
         maxLength: 128
   schemas:
+    DeviceEnrollment:
+      type: object
+      required: [device_id, account_id, status]
+      properties:
+        device_id:
+          type: string
+        account_id:
+          type: string
+        status:
+          const: enrolled
     Device:
       type: object
       required: [device_id, label, platform, status, capabilities]
@@ -353,18 +359,17 @@ components:
           type: array
           items:
             type: string
+        created_at:
+          type: integer
         last_seen_at:
           type: integer
           nullable: true
     EncryptedMemoryInput:
       type: object
-      required: [memory_id, revision, payload_ciphertext, payload_nonce, key_version, source_kind]
+      required: [memory_id, payload_ciphertext, payload_nonce, key_version]
       properties:
         memory_id:
           type: string
-        revision:
-          type: integer
-          minimum: 1
         payload_ciphertext:
           type: string
           contentEncoding: base64
@@ -380,8 +385,11 @@ components:
       allOf:
         - $ref: "#/components/schemas/EncryptedMemoryInput"
         - type: object
-          required: [trust_state, updated_at]
+          required: [revision, trust_state, updated_at]
           properties:
+            revision:
+              type: integer
+              minimum: 1
             trust_state:
               enum: [pending, approved, rejected, quarantined, deleted]
             updated_at:

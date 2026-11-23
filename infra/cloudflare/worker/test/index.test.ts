@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import worker, { decodeMemoryCursor, encodeMemoryCursor, modelRouteMetadata, readRequestBodyBounded } from "../src/index";
+import worker, { decodeMemoryCursor, encodeMemoryCursor, modelRouteMetadata, readRequestBodyBounded, isValidCapabilityList } from "../src/index";
 const env = {} as any;
 describe("NEO Worker unauthenticated surface", () => {
   it("exposes a minimal health response without authentication", async () => {
@@ -83,5 +83,20 @@ describe("bounded request body reader", () => {
       method: "POST", headers: { "content-length": "999" }, body: "x",
     });
     await expect(readRequestBodyBounded(req, 10)).rejects.toThrow("Request body too large");
+  });
+});
+
+
+describe("device capability validation", () => {
+  it("accepts bounded, unique capability identifiers", () => {
+    expect(isValidCapabilityList(["cpu", "gpu", "voice.transcribe"])).toBe(true);
+  });
+
+  it("rejects malformed, duplicate, oversized, and non-string capability lists", () => {
+    expect(isValidCapabilityList(["cpu", "CPU"])).toBe(false);
+    expect(isValidCapabilityList(["cpu", "cpu"])).toBe(false);
+    expect(isValidCapabilityList(Array.from({ length: 33 }, (_, i) => "cap" + i))).toBe(false);
+    expect(isValidCapabilityList(["cpu", 42])).toBe(false);
+    expect(isValidCapabilityList({ capability: "cpu" })).toBe(false);
   });
 });

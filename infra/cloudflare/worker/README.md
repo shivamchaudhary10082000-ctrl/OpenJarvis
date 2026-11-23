@@ -10,7 +10,8 @@ This directory contains the first executable NEO API gateway implementation. It 
 - Device listing, online freshness indicator, and revocation.
 - Client-encrypted memory create, incremental sync cursor, explicit approval into a new immutable revision, and deletion tombstones.
 - Encrypted task enqueue, idempotency, capability-aware device claiming, expiring leases, retry after lease expiry, and task status.
-- Streaming request-body limits: JSON payloads are bounded by `MAX_BODY_BYTES` (default 1 MB); voice payloads are bounded at 15 MB before complete buffering.
+- Streaming request-body limits: JSON payloads are bounded by `MAX_BODY_BYTES` (default 1 MB, hard maximum 5 MB); voice payloads are bounded at 15 MB.
+- Durable per-account fixed-window API rate limiting (default 60 requests/minute; configurable with `MAX_REQUESTS_PER_MINUTE`, capped at 600).
 - OpenAI-compatible primary/backup chat routing with explicit provider/model/tier/fallback metadata. Explicit model requests never silently fall back.
 - Authenticated transcription and speech synthesis proxy routes.
 
@@ -29,7 +30,7 @@ The tests currently cover the unauthenticated health route and rejection of prot
 1. Create a Cloudflare Access application and set its issuer domain and audience in `wrangler.toml`.
 2. Create a D1 database and replace the placeholder database ID.
 3. Apply migrations in order:
-   `wrangler d1 migrations apply neo-staging --remote` (including migration `0003_task_capabilities.sql`).
+   `wrangler d1 migrations apply neo-staging --remote` (including migrations `0003_task_capabilities.sql` and `0004_api_rate_limits.sql`).
 4. Set provider credentials using `wrangler secret put MODEL_PRIMARY_API_KEY` and, if approved, `MODEL_BACKUP_API_KEY`.
 5. Configure provider base URLs and model IDs in Worker vars. Use independent providers for meaningful backup resilience.
 6. Run `wrangler dev`, test with a dedicated staging Access account, and only then deploy to staging.

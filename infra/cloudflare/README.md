@@ -8,7 +8,7 @@ See openapi.yaml for the v0 device, encrypted-memory, task-lease, chat-routing a
 
 Intended resources:
 - Workers for authenticated API gateway, policy checks, model routing and provider adapters.
-- D1 for accounts, devices, encrypted memory revisions, task leases, audit records, rate limits, idempotency and spend/token ledgers.
+- D1 for accounts, devices, encrypted memory revisions, task leases, audit records, rate limits, idempotency and spend/token ledgers. A 15-minute Worker cron removes expired device nonces; settled spend records are retained for audit.
 - R2 for client-encrypted attachments, exports and snapshots (not yet implemented).
 - Durable Objects for per-account ordering, device/task coordination and presence (not yet implemented).
 - Cloudflare Access for user identity; the Worker verifies the Access JWT itself.

@@ -14,7 +14,8 @@
     "@cloudflare/workers-types": "^5.20261121.1",
     "typescript": "^5.9.3",
     "vitest": "^5.1.1",
-    "wrangler": "^4.157.0"
+    "wrangler": "^4.157.0",
+    "fake-indexeddb": "^6.2.4"
   },
   "type": "module"
 }

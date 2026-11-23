@@ -349,6 +349,30 @@ describe("D1-backed provider budgets, failover, and voice", () => {
 });
 
 describe("D1-backed encrypted memory and task concurrency", () => {
+  it("replays an offline memory write idempotently and rejects key reuse with changed content", async () => {
+    const device = await enrolDevice("memory-idempotency-" + crypto.randomUUID(), "Memory idempotency device");
+    const key = "memory-idem-" + crypto.randomUUID();
+    const input = encryptedPayload({ memory_id: "offline-memory" });
+    const send = (payload: Record<string, unknown>) => call(device, "/v1/memory", {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": key },
+      body: JSON.stringify(payload),
+    });
+    const first = await send(input);
+    expect(first.status).toBe(201);
+    const firstBody = await first.json() as { revision: number };
+    const replay = await send(input);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({ revision: firstBody.revision, memory_id: "offline-memory" });
+
+    const changed = await send({ ...input, payload_ciphertext: "D".repeat(32) });
+    expect(changed.status).toBe(409);
+    const count = await bindings.DB.prepare(
+      "SELECT COUNT(*) AS count FROM memory_records WHERE account_id=? AND memory_id=?",
+    ).bind(device.account, "offline-memory").first<{ count: number }>();
+    expect(count?.count).toBe(1);
+  });
+
   it("allocates distinct memory revisions under concurrent writes", async () => {
     const device = await enrolDevice("memory-race-" + crypto.randomUUID(), "Memory race device");
     const requests = await Promise.all(Array.from({ length: 8 }, (_, index) =>
@@ -365,6 +389,26 @@ describe("D1-backed encrypted memory and task concurrency", () => {
       (await response.json() as { revision: number }).revision,
     ));
     expect([...revisions].sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
+  it("replays encrypted task enqueue with the same key and rejects changed payloads", async () => {
+    const device = await enrolDevice("task-idempotency-" + crypto.randomUUID(), "Task idempotency device");
+    const key = "task-idem-" + crypto.randomUUID();
+    const input = encryptedPayload({ task_kind: "offline.compute" });
+    const send = (payload: Record<string, unknown>) => call(device, "/v1/tasks", {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": key },
+      body: JSON.stringify(payload),
+    });
+    const first = await send(input);
+    expect(first.status).toBe(202);
+    const firstBody = await first.json() as { task_id: string };
+    const replay = await send(input);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({ task_id: firstBody.task_id, state: "queued" });
+
+    const changed = await send({ ...input, payload_ciphertext: "D".repeat(32) });
+    expect(changed.status).toBe(409);
   });
 
   it("only leases a task to a device with every required capability", async () => {

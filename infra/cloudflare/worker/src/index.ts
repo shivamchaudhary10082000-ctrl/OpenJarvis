@@ -34,6 +34,10 @@ export function encodeBytesBase64Url(bytes: Uint8Array): string {
 }
 
 const enc = new TextEncoder();
+async function sha256Hex(value: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(value)));
+  return Array.from(digest, byte => byte.toString(16).padStart(2, "0")).join("");
+}
 const now = () => Math.floor(Date.now() / 1000);
 class RateLimitExceeded extends Error {}
 const spendMonth = () => new Date().toISOString().slice(0, 7);
@@ -307,10 +311,39 @@ async function route(req: Request, env: Env): Promise<Response> {
       const x = await bodyJson<any>(req,env);
       if (!validCipher(x) || typeof x.memory_id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(x.memory_id)) return fail(400,"invalid_memory","Invalid encrypted memory payload");
       const t=now();
+      const sourceKind=String(x.source_kind || "user").slice(0,40);
+      const idempotencyKey=req.headers.get("idempotency-key")||"";
+      if(idempotencyKey){
+        if(!/^[A-Za-z0-9_-]{16,128}$/.test(idempotencyKey))return fail(400,"idempotency_required","A valid Idempotency-Key is required");
+        const requestHash=await sha256Hex(JSON.stringify({memory_id:x.memory_id,payload_ciphertext:x.payload_ciphertext,payload_nonce:x.payload_nonce,key_version:x.key_version,source_kind:sourceKind}));
+        const findPrior=async()=>env.DB.prepare("SELECT i.memory_id,i.revision,i.request_hash,m.trust_state,m.created_at,m.updated_at FROM memory_write_idempotency i JOIN memory_records m ON m.account_id=i.account_id AND m.memory_id=i.memory_id AND m.revision=i.revision WHERE i.account_id=? AND i.idempotency_key=?").bind(account,idempotencyKey).first<any>();
+        const prior=await findPrior();
+        if(prior){
+          if(prior.memory_id!==x.memory_id||prior.request_hash!==requestHash)return fail(409,"idempotency_conflict","Idempotency-Key was already used for a different memory payload");
+          return json({memory_id:prior.memory_id,revision:prior.revision,trust_state:prior.trust_state,created_at:prior.created_at,updated_at:prior.updated_at},200);
+        }
+        try{
+          await env.DB.batch([
+            env.DB.prepare("INSERT INTO memory_records(memory_id,revision,account_id,trust_state,payload_ciphertext,payload_nonce,key_version,source_device_id,source_kind,created_at,updated_at) SELECT ?, COALESCE(MAX(revision),0)+1, ?, 'pending', ?, ?, ?, ?, ?, ?, ? FROM memory_records WHERE account_id=? AND memory_id=?")
+              .bind(x.memory_id,account,b64u(x.payload_ciphertext),b64u(x.payload_nonce),x.key_version,device.device_id,sourceKind,t,t,account,x.memory_id),
+            env.DB.prepare("INSERT INTO memory_write_idempotency(account_id,idempotency_key,memory_id,revision,request_hash,created_at) SELECT ?,?,?,MAX(revision),?,? FROM memory_records WHERE account_id=? AND memory_id=?")
+              .bind(account,idempotencyKey,x.memory_id,requestHash,t,account,x.memory_id),
+          ]);
+        }catch{
+          const raced=await findPrior();
+          if(raced&&raced.memory_id===x.memory_id&&raced.request_hash===requestHash)
+            return json({memory_id:raced.memory_id,revision:raced.revision,trust_state:raced.trust_state,created_at:raced.created_at,updated_at:raced.updated_at},200);
+          if(raced)return fail(409,"idempotency_conflict","Idempotency-Key was already used for a different memory payload");
+          return fail(409,"revision_conflict","Memory revision could not be allocated; retry the request");
+        }
+        const saved=await findPrior();
+        if(!saved)return fail(409,"revision_conflict","Memory revision could not be allocated; retry the request");
+        return json({memory_id:saved.memory_id,revision:saved.revision,trust_state:saved.trust_state,created_at:saved.created_at,updated_at:saved.updated_at},201);
+      }
       const inserted=await env.DB.prepare("INSERT INTO memory_records(memory_id,revision,account_id,trust_state,payload_ciphertext,payload_nonce,key_version,source_device_id,source_kind,created_at,updated_at) SELECT ?, COALESCE(MAX(revision),0)+1, ?, 'pending', ?, ?, ?, ?, ?, ?, ? FROM memory_records WHERE account_id=? AND memory_id=? RETURNING revision")
-        .bind(x.memory_id,account,b64u(x.payload_ciphertext),b64u(x.payload_nonce),x.key_version,device.device_id,String(x.source_kind || "user").slice(0,40),t,t,account,x.memory_id).first<{revision:number}>();
+        .bind(x.memory_id,account,b64u(x.payload_ciphertext),b64u(x.payload_nonce),x.key_version,device.device_id,sourceKind,t,t,account,x.memory_id).first<{revision:number}>();
       const first=inserted || await env.DB.prepare("INSERT INTO memory_records(memory_id,revision,account_id,trust_state,payload_ciphertext,payload_nonce,key_version,source_device_id,source_kind,created_at,updated_at) VALUES(?,1,?,'pending',?,?,?,?,?,?,?) RETURNING revision")
-        .bind(x.memory_id,account,b64u(x.payload_ciphertext),b64u(x.payload_nonce),x.key_version,device.device_id,String(x.source_kind || "user").slice(0,40),t,t).first<{revision:number}>();
+        .bind(x.memory_id,account,b64u(x.payload_ciphertext),b64u(x.payload_nonce),x.key_version,device.device_id,sourceKind,t,t).first<{revision:number}>();
       if (!first) return fail(409,"revision_conflict","Memory revision could not be allocated; retry the request");
       return json({memory_id:x.memory_id,revision:first.revision,trust_state:"pending",created_at:t,updated_at:t},201);
     }
@@ -345,12 +378,14 @@ async function route(req: Request, env: Env): Promise<Response> {
           new Set(requiredCapabilities).size !== requiredCapabilities.length) return fail(400,"invalid_capabilities","required_capabilities must be up to 32 unique capability identifiers");
       const key=req.headers.get("idempotency-key")||"";
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(key)) return fail(400,"idempotency_required","A valid Idempotency-Key is required");
+      const requestHash=await sha256Hex(JSON.stringify({task_kind:x.task_kind,payload_ciphertext:x.payload_ciphertext,payload_nonce:x.payload_nonce,key_version:x.key_version,required_capabilities:requiredCapabilities}));
       const task=id();
       try {
-        await env.DB.prepare("INSERT INTO task_leases(task_id,account_id,task_kind,state,idempotency_key,payload_ciphertext,payload_nonce,key_version,created_at,updated_at,required_capabilities_json) VALUES(?,?,?,'queued',?,?,?,?,?,?,?)").bind(task,account,x.task_kind,key,b64u(x.payload_ciphertext),b64u(x.payload_nonce),x.key_version,now(),now(),JSON.stringify(requiredCapabilities)).run();
+        await env.DB.prepare("INSERT INTO task_leases(task_id,account_id,task_kind,state,idempotency_key,payload_ciphertext,payload_nonce,key_version,created_at,updated_at,required_capabilities_json,request_hash) VALUES(?,?,?,'queued',?,?,?,?,?,?,?,?)").bind(task,account,x.task_kind,key,b64u(x.payload_ciphertext),b64u(x.payload_nonce),x.key_version,now(),now(),JSON.stringify(requiredCapabilities),requestHash).run();
       } catch {
-        const existing=await env.DB.prepare("SELECT task_id,state FROM task_leases WHERE account_id=? AND idempotency_key=?").bind(account,key).first();
-        if (existing) return json(existing,200);
+        const existing=await env.DB.prepare("SELECT task_id,state,request_hash FROM task_leases WHERE account_id=? AND idempotency_key=?").bind(account,key).first<any>();
+        if (existing && existing.request_hash===requestHash) return json({task_id:existing.task_id,state:existing.state},200);
+        if (existing) return fail(409,"idempotency_conflict","Idempotency-Key was already used for a different task payload");
         throw new Error("Task could not be queued");
       }
       return json({task_id:task,state:"queued"},202);

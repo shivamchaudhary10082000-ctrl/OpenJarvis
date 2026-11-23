@@ -23,7 +23,7 @@ export interface Env {
   VOICE_TRANSCRIBE_MAX_COST_USD_MICROS?: string;
   VOICE_SYNTHESIS_MAX_COST_USD_MICROS?: string;
 }
-type Claims = { sub: string; iss: string; aud: string | string[]; exp: number; email?: string };
+type Claims = { sub: string; iss: string; aud: string | string[]; exp: number; nbf?: number; email?: string };
 type Device = { device_id: string; account_id: string; public_key_jwk: string; revoked_at: number | null };
 const json = (data: unknown, status = 200, headers: HeadersInit = {}) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...headers } });
@@ -180,7 +180,18 @@ async function accessClaims(token: string, env: Env): Promise<Claims> {
   if (!valid) throw new Error("Invalid access token signature");
   const claims = JSON.parse(new TextDecoder().decode(b64u(parts[1]))) as Claims;
   const aud = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
-  if (claims.iss !== issuer || !aud.includes(env.ACCESS_AUD) || !claims.sub || claims.exp <= now()) throw new Error("Invalid access token claims");
+  const currentTime = now();
+  const notBeforeValid = claims.nbf === undefined ||
+    (Number.isFinite(claims.nbf) && claims.nbf <= currentTime);
+  if (
+    claims.iss !== issuer ||
+    !aud.includes(env.ACCESS_AUD) ||
+    typeof claims.sub !== "string" ||
+    !claims.sub.trim() ||
+    !Number.isFinite(claims.exp) ||
+    claims.exp <= currentTime ||
+    !notBeforeValid
+  ) throw new Error("Invalid access token claims");
   return claims;
 }
 function accessTokenFromRequest(req: Request): string {

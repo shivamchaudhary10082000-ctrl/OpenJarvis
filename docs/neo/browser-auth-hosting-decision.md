@@ -32,9 +32,11 @@ The example path above is a topology proposal, not a configured route. The actua
 
 ### Current server contract
 
-The Worker accepts either `Cf-Access-Jwt-Assertion` (the Cloudflare Access browser assertion) or `Authorization: Bearer <Cloudflare Access JWT>` (native/controlled clients). The assertion header takes precedence whenever it is present; an invalid assertion never falls back to a valid bearer header. Both paths are verified by the same RS256 JWKS, exact issuer, configured audience and expiry checks. An email or unsigned identity header alone is never trusted. The account ID comes from the verified `sub` claim. First-device enrolment and later signed routes now share this token extraction contract. Device authorization is a second independent factor: an enrolled device must sign each protected request with its P-256 private key.
+The Worker accepts either `Cf-Access-Jwt-Assertion` (the Cloudflare Access browser assertion) or `Authorization: Bearer <Cloudflare Access JWT>` (native/controlled clients). The assertion header takes precedence whenever it is present; an invalid assertion never falls back to a valid bearer header. Both paths are verified by the same RS256 JWKS, exact issuer, configured audience, expiry and optional not-before (`nbf`) checks. An email or unsigned identity header alone is never trusted. The account ID comes from the verified `sub` claim. First-device enrolment and later signed routes now share this token extraction contract. Device authorization is a second independent factor: an enrolled device must sign each protected request with its P-256 private key.
 
-A generic OIDC access token is **not** interchangeable with this token. Unless the Worker trust contract is deliberately changed and reviewed, the token must be issued for the configured Cloudflare Access issuer and application audience.
+Cloudflare documents the Access application-token `sub` as a user ID unique to an email address within a Zero Trust account (not the email claim itself). It can change if the identity is removed and re-added or authenticates through a different Zero Trust account. The Worker persists `sub` directly as `account_id`; therefore the chosen Access team/identity-provider tenant is part of NEO's account namespace. Keep that tenant stable for the initial release and plan an explicit account-data migration before changing it. The browser client's `accountScope` must be derived from that same verified subject, never from the email address or display name.
+
+A generic OIDC access token is **not** interchangeable with this token. Unless the Worker trust contract is deliberately changed and reviewed, the token must be issued for the configured Cloudflare Access issuer and application audience. The Worker now rejects a future `nbf` and non-finite/missing expiry or subject values; a missing `nbf` remains allowed because JWTs may omit that optional claim.
 
 ### Browser-specific Access caveat
 
@@ -89,7 +91,7 @@ In the inspected existing chat-message renderer, ReactMarkdown is used without e
 - Earlier baseline commit `dc45f8a...` passed 51/51 Vitest tests and native Playwright IndexedDB persistence 9/9 across Chromium, Firefox and WebKit. That result predates the Access-assertion implementation and must not be treated as current-head verification.
 - The Playwright suite validates browser CryptoKey persistence, encrypted cache recovery and ciphertext outbox replay. It does not validate a real Access login, production CSP headers, CORS, account recovery or real host origins.
 - Browser client tests cover fresh callback tokens on enrolment and requests, no IndexedDB token persistence, and same-origin cookie-mode requests. The new cookie-enrolment and invalid-assertion enrolment regressions are pending CI on the current branch head.
-- Worker integration covers the Access-injected assertion on signed routes and enrolment, including invalid-assertion precedence. The test environment uses a mocked Access JWKS and local SQLite-backed D1; it does not prove Cloudflare Access edge injection or remote D1 behavior.
+- Worker integration covers the Access-injected assertion on signed routes and enrolment, invalid-assertion precedence, and rejection of a future `nbf`. The test environment uses a mocked Access JWKS and local SQLite-backed D1; it does not prove Cloudflare Access edge injection or remote D1 behavior.
 - No live-host CSP/authentication test or independent penetration test has been performed.
 
 ## 7. Owner decisions and morning gates

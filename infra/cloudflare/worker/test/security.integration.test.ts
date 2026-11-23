@@ -23,7 +23,7 @@ function base64UrlJson(value: unknown): string {
 
 async function accessToken(
   subject: string,
-  overrides: Partial<{ iss: string; aud: string | string[]; exp: number }> = {},
+  overrides: Partial<{ iss: string; aud: string | string[]; exp: number; nbf: number }> = {},
 ): Promise<string> {
   const header = base64UrlJson({ alg: "RS256", kid: "neo-test-key" });
   const payload = base64UrlJson({
@@ -31,6 +31,7 @@ async function accessToken(
     iss: issuer,
     aud: audience,
     exp: Math.floor(Date.now() / 1000) + 300,
+    nbf: Math.floor(Date.now() / 1000) - 1,
     ...overrides,
   });
   const input = header + "." + payload;
@@ -191,6 +192,12 @@ describe("D1-backed Access and device proof", () => {
       headers: { authorization: "Bearer " + expired, "x-neo-device-id": device.id },
     }), bindings);
     expect(expiryResponse.status).toBe(401);
+
+    const notYetValid = await accessToken(account, { nbf: Math.floor(Date.now() / 1000) + 60 });
+    const notBeforeResponse = await worker.fetch(new Request(baseUrl + "/v1/devices", {
+      headers: { authorization: "Bearer " + notYetValid, "x-neo-device-id": device.id },
+    }), bindings);
+    expect(notBeforeResponse.status).toBe(401);
 
     const valid = await accessToken(account);
     const parts = valid.split(".");

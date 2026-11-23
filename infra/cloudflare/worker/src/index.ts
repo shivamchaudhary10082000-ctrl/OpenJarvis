@@ -596,4 +596,13 @@ async function voiceRoute(req:Request,env:Env,mode:"transcribe"|"synthesize",acc
   try{await settleProviderSpend(env,reservationId,maxCost);}catch{return fail(503,"spend_settlement_failed","Voice spend could not be reconciled; further inference is blocked");}
   return new Response(upstream.body,{status:upstream.status,headers:{"content-type":upstream.headers.get("content-type")||"application/octet-stream","cache-control":"no-store"}});
 }
-export default { fetch: (req:Request,env:Env) => route(req,env) };
+export async function cleanupExpiredDeviceNonces(env: Env): Promise<number> {
+  const result = await env.DB.prepare("DELETE FROM device_nonces WHERE expires_at < ?").bind(now()).run();
+  return Number(result.meta.changes || 0);
+}
+export default {
+  fetch: (req:Request,env:Env) => route(req,env),
+  scheduled: async (_controller: ScheduledController, env: Env) => {
+    await cleanupExpiredDeviceNonces(env);
+  },
+};

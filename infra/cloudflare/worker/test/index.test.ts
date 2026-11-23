@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import worker, { decodeMemoryCursor, encodeMemoryCursor } from "../src/index";
+import worker, { decodeMemoryCursor, encodeMemoryCursor, modelRouteMetadata } from "../src/index";
 const env = {} as any;
 describe("NEO Worker unauthenticated surface", () => {
   it("exposes a minimal health response without authentication", async () => {
@@ -34,5 +34,24 @@ describe("NEO memory sync cursor", () => {
   it("rejects invalid row ids before encoding", () => {
     expect(() => encodeMemoryCursor(-1)).toThrow("Invalid memory cursor row id");
     expect(() => encodeMemoryCursor(1.25)).toThrow("Invalid memory cursor row id");
+  });
+});
+
+
+describe("NEO model route disclosure", () => {
+  it("labels an explicitly selected backup as backup without claiming fallback", () => {
+    expect(modelRouteMetadata("backup-model", "primary-model", false, true, "not_used", 12)).toEqual({
+      tier: "backup", fallback_used: false, fallback_reason: null, latency_ms: 12, account_scope: "private",
+    });
+  });
+
+  it("discloses automatic failover when the primary was available but failed", () => {
+    expect(modelRouteMetadata("backup-model", "primary-model", true, true, "provider_http_503", 34)).toEqual({
+      tier: "backup", fallback_used: true, fallback_reason: "provider_http_503", latency_ms: 34, account_scope: "private",
+    });
+  });
+
+  it("does not claim fallback when only the backup is configured", () => {
+    expect(modelRouteMetadata("backup-model", "primary-model", true, false, "not_used", 20).fallback_used).toBe(false);
   });
 });

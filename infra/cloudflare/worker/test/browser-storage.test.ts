@@ -19,7 +19,8 @@ describe("browser IndexedDB persistence and recovery", () => {
   });
 
   it("recovers an encrypted memory cache after a simulated offline restart", async () => {
-    const client = await NeoDeviceClient.create("https://neo.test", token, account());
+    const scope = account();
+    const client = await NeoDeviceClient.create("https://neo.test", token, scope);
     const record = {
       memory_id: "memory-1",
       revision: 1,
@@ -38,7 +39,7 @@ describe("browser IndexedDB persistence and recovery", () => {
     expect(online.records).toEqual([record]);
 
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")));
-    const recoveredClient = await NeoDeviceClient.create("https://neo.test", token, client["scopeKey"]);
+    const recoveredClient = await NeoDeviceClient.create("https://neo.test", token, scope);
     const offline = await recoveredClient.syncMemory();
     expect(offline.offline).toBe(true);
     expect(offline.records).toEqual([record]);

@@ -253,6 +253,28 @@ describe("D1-backed Access and device proof", () => {
     expect(onlineBody.devices.find(device => device.device_id === secondary.id)?.presence).toBe("online");
   });
 
+  it("marks a device offline after the 90-second heartbeat freshness window", async () => {
+    const account = "presence-expiry-" + crypto.randomUUID();
+    const owner = await enrolDevice(account, "Presence owner");
+    const secondary = await enrolDevice(account, "Presence secondary");
+    await bindings.DB.prepare("UPDATE devices SET last_seen_at = ? WHERE device_id = ?")
+      .bind(Math.floor(Date.now() / 1000) - 91, secondary.id).run();
+
+    const response = await call(owner, "/v1/devices");
+    const body = await response.json() as { devices: Array<{ device_id: string; presence: string }> };
+    expect(body.devices.find(device => device.device_id === secondary.id)?.presence).toBe("offline");
+
+    const heartbeat = await call(secondary, "/v1/devices/heartbeat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(heartbeat.status).toBe(200);
+    const refreshed = await call(owner, "/v1/devices");
+    const refreshedBody = await refreshed.json() as { devices: Array<{ device_id: string; presence: string }> };
+    expect(refreshedBody.devices.find(device => device.device_id === secondary.id)?.presence).toBe("online");
+  });
+
   it("revokes a second device and rejects all later requests from it", async () => {
     const account = "revocation-" + crypto.randomUUID();
     const owner = await enrolDevice(account, "Owner device");
@@ -456,6 +478,27 @@ describe("D1-backed provider budgets, failover, and voice", () => {
     ).bind(device.account).first<{ reserved_microusd: number; spent_microusd: number }>();
     expect(usage?.reserved_microusd).toBe(0);
     expect(usage?.spent_microusd).toBeGreaterThan(0);
+  });
+
+  it("settles the maximum voice reservation once on upstream failure and does not blindly retry billable audio", async () => {
+    const device = await enrolDevice("voice-failure-" + crypto.randomUUID(), "Voice failure device");
+    let upstreamCalls = 0;
+    mockAccessCerts(async () => {
+      upstreamCalls++;
+      throw new Error("simulated upstream timeout");
+    });
+    const response = await call(device, "/v1/voice/transcribe", {
+      method: "POST",
+      headers: { "content-type": "audio/webm" },
+      body: new Uint8Array([1, 2, 3, 4]),
+    });
+    expect(response.status).toBe(502);
+    expect(upstreamCalls).toBe(1);
+    const usage = await bindings.DB.prepare(
+      "SELECT reserved_microusd, spent_microusd FROM provider_spend_usage WHERE account_id = ?",
+    ).bind(device.account).first<{ reserved_microusd: number; spent_microusd: number }>();
+    expect(usage?.reserved_microusd).toBe(0);
+    expect(usage?.spent_microusd).toBe(1000);
   });
 
   it("proxies speech synthesis and charges its configured maximum request cost", async () => {

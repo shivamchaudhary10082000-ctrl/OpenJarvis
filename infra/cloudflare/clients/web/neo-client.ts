@@ -99,15 +99,26 @@ async function loadCursor(scopeKey:string):Promise<string|undefined>{
   });}finally{db.close();}
 }
 const retryableStatus=(status:number)=>status===408||status===425||status===429||status>=500;
+export async function createDeviceIdentity():Promise<StoredIdentity>{
+  // WebCrypto applies extractability to both halves of a generated pair. Generate
+  // temporarily exportable keys, then immediately re-import the private JWK as
+  // non-exportable; only that non-exportable CryptoKey is persisted in IndexedDB.
+  const pair=await crypto.subtle.generateKey({name:"ECDSA",namedCurve:"P-256"},true,["sign","verify"]);
+  const publicJwk=await crypto.subtle.exportKey("jwk",pair.publicKey);
+  const privateJwk=await crypto.subtle.exportKey("jwk",pair.privateKey);
+  const privateKey=await crypto.subtle.importKey("jwk",privateJwk,{name:"ECDSA",namedCurve:"P-256"},false,["sign"]);
+  for(const key of Object.keys(privateJwk)) delete (privateJwk as Record<string,unknown>)[key];
+  if(privateKey.extractable)throw new Error("Browser device private key must be non-exportable");
+  return {deviceId:randomId(),privateKey,publicJwk};
+}
+
 export class NeoDeviceClient {
   private constructor(private baseUrl:string,private accessToken:()=>Promise<string>,private identity:StoredIdentity){}
   static async create(baseUrl:string,accessToken:()=>Promise<string>){
     let identity=await loadIdentity();
+    if(identity?.privateKey.extractable)identity=null;
     if(!identity){
-      const pair=await crypto.subtle.generateKey({name:"ECDSA",namedCurve:"P-256"},false,["sign","verify"]);
-      const publicJwk=await crypto.subtle.exportKey("jwk",pair.publicKey);
-      // Persist the non-exportable CryptoKey directly in IndexedDB; never export private key material.
-      identity={deviceId:randomId(),privateKey:pair.privateKey,publicJwk};
+      identity=await createDeviceIdentity();
       await saveIdentity(identity);
     }
     return new NeoDeviceClient(baseUrl.endsWith("/") ? baseUrl.slice(0,-1) : baseUrl,accessToken,identity);

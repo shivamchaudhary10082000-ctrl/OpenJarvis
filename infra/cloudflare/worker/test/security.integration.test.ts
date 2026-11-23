@@ -162,7 +162,7 @@ beforeAll(async () => {
     true,
     ["sign", "verify"],
   );
-  accessPublicJwk = await crypto.subtle.exportKey("jwk", accessKeys.publicKey);
+  accessPublicJwk = { ...(await crypto.subtle.exportKey("jwk", accessKeys.publicKey)), kid: "neo-test-key" } as JsonWebKey;
 });
 
 beforeEach(() => mockAccessCerts());
@@ -309,10 +309,15 @@ describe("D1-backed provider budgets, failover, and voice", () => {
     expect(primaryCalls).toBe(1);
     expect(backupCalls).toBe(0);
 
+    const second = await request();
+    expect(second.status).toBe(502);
+    expect(primaryCalls).toBe(2);
+    expect(backupCalls).toBe(0);
+
     const blocked = await request();
     expect(blocked.status).toBe(429);
     expect(await blocked.json()).toMatchObject({ error: { code: "spend_budget_exceeded" } });
-    expect(primaryCalls).toBe(1);
+    expect(primaryCalls).toBe(2);
   });
 
   it("proxies transcription audio and records the configured maximum request cost", async () => {

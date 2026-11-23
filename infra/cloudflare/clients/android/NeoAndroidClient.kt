@@ -182,6 +182,9 @@ class NeoAndroidClient(
             .put("blocked_on", blockedOn)
     }
 
+    suspend fun heartbeat(): okhttp3.Response =
+        signedRequest("POST", "/devices/heartbeat", "{}".toByteArray(), "application/json")
+
     suspend fun claimTask(leaseSeconds: Int = 90): okhttp3.Response =
         signedRequest("POST", "/tasks/claim", JSONObject().put("lease_seconds", leaseSeconds).toString().toByteArray(), "application/json")
 

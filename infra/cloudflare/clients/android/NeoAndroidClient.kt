@@ -105,9 +105,11 @@ class NeoAndroidClient(
         response.use {
             if (!it.isSuccessful) throw IllegalStateException("Memory sync failed: ${it.code}")
             val payload = JSONObject(it.body?.string() ?: "{}")
-            offlineStore.cacheMemory(payload.optJSONArray("records") ?: org.json.JSONArray())
-            val next = payload.optString("next_cursor", "")
-            if (next.isNotEmpty()) offlineStore.saveCursor(next)
+            withContext(Dispatchers.IO) {
+                offlineStore.cacheMemory(payload.optJSONArray("records") ?: org.json.JSONArray())
+                val next = payload.optString("next_cursor", "")
+                if (next.isNotEmpty()) offlineStore.saveCursor(next)
+            }
             payload.put("offline", false)
             return payload
         }
@@ -118,13 +120,13 @@ class NeoAndroidClient(
         val response = try {
             signedRequest("POST", "/memory", jsonBody.toByteArray(), "application/json", headers)
         } catch (error: IOException) {
-            val id = offlineStore.enqueue("memory.create", "/memory", idempotencyKey, jsonBody)
+            val id = withContext(Dispatchers.IO) { offlineStore.enqueue("memory.create", "/memory", idempotencyKey, jsonBody) }
             return JSONObject().put("status", "queued_offline").put("outbox_id", id).put("idempotency_key", idempotencyKey)
         }
         response.use {
             if (it.isSuccessful) return JSONObject(it.body?.string() ?: "{}")
             if (it.code == 408 || it.code == 425 || it.code == 429 || it.code >= 500) {
-                val id = offlineStore.enqueue("memory.create", "/memory", idempotencyKey, jsonBody)
+                val id = withContext(Dispatchers.IO) { offlineStore.enqueue("memory.create", "/memory", idempotencyKey, jsonBody) }
                 return JSONObject().put("status", "queued_offline").put("outbox_id", id).put("idempotency_key", idempotencyKey)
             }
             throw IllegalStateException("Memory write failed: ${it.code}")
@@ -136,13 +138,13 @@ class NeoAndroidClient(
         val response = try {
             signedRequest("POST", "/tasks", jsonBody.toByteArray(), "application/json", headers)
         } catch (error: IOException) {
-            val id = offlineStore.enqueue("task.enqueue", "/tasks", idempotencyKey, jsonBody)
+            val id = withContext(Dispatchers.IO) { offlineStore.enqueue("task.enqueue", "/tasks", idempotencyKey, jsonBody) }
             return JSONObject().put("status", "queued_offline").put("outbox_id", id).put("idempotency_key", idempotencyKey)
         }
         response.use {
             if (it.isSuccessful) return JSONObject(it.body?.string() ?: "{}")
             if (it.code == 408 || it.code == 425 || it.code == 429 || it.code >= 500) {
-                val id = offlineStore.enqueue("task.enqueue", "/tasks", idempotencyKey, jsonBody)
+                val id = withContext(Dispatchers.IO) { offlineStore.enqueue("task.enqueue", "/tasks", idempotencyKey, jsonBody) }
                 return JSONObject().put("status", "queued_offline").put("outbox_id", id).put("idempotency_key", idempotencyKey)
             }
             throw IllegalStateException("Task enqueue failed: ${it.code}")
@@ -152,7 +154,8 @@ class NeoAndroidClient(
     suspend fun flushOutbox(): JSONObject {
         var sent = 0
         var blockedOn: String? = null
-        for (item in offlineStore.pending()) {
+        val pendingItems = withContext(Dispatchers.IO) { offlineStore.pending() }
+        for (item in pendingItems) {
             val response = try {
                 signedRequest(
                     "POST", item.path, item.body.toByteArray(), "application/json",
@@ -162,19 +165,20 @@ class NeoAndroidClient(
                 blockedOn = item.id
                 break
             }
-            response.use {
+            val accepted = response.use {
                 if (it.isSuccessful) {
-                    offlineStore.remove(item.id)
-                    sent++
+                    withContext(Dispatchers.IO) { offlineStore.remove(item.id) }
+                    true
                 } else {
                     blockedOn = item.id
-                    break
+                    false
                 }
             }
+            if (!accepted) break
         }
         return JSONObject()
             .put("sent", sent)
-            .put("remaining", offlineStore.pending().size)
+            .put("remaining", withContext(Dispatchers.IO) { offlineStore.pending().size })
             .put("blocked_on", blockedOn)
     }
 

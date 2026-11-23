@@ -152,7 +152,7 @@ export class NeoDeviceClient {
     const payload=await response.json() as {records?:Record<string,unknown>[];next_cursor?:string|null};
     const records=payload.records||[];
     await cacheMemory(records);
-    if(payload.next_cursor!==undefined)await saveCursor(payload.next_cursor);
+    if(payload.next_cursor)await saveCursor(payload.next_cursor);
     return {...payload,offline:false};
   }
   async getCachedMemory(includePending=false){return readCachedMemory(includePending);}

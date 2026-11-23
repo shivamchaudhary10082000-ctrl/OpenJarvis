@@ -188,6 +188,7 @@ class NeoAndroidClient(
             val accepted = response.use {
                 if (it.isSuccessful) {
                     withContext(Dispatchers.IO) { offlineStore.remove(item.id) }
+                    sent++
                     true
                 } else {
                     blockedOn = item.id

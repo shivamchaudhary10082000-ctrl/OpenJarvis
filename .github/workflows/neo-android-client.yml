@@ -22,6 +22,9 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: true
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0"
       - uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: "8.13"
@@ -38,10 +41,12 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: true
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0 system-images;android-36;google_apis;x86_64"
       - uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: "8.13"
-      - run: sdkmanager "platform-tools" "platforms;android-36" "system-images;android-36;google_apis;x86_64"
       - run: echo "no" | avdmanager create avd --name neo-api-36 --package "system-images;android-36;google_apis;x86_64" --device "pixel_2"
       - run: |
           nohup emulator -avd neo-api-36 -no-window -no-audio -no-boot-anim &

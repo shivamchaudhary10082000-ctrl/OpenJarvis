@@ -24,7 +24,7 @@ const now = () => Math.floor(Date.now() / 1000);
 // log. It prevents same-second writes/revisions from being skipped by cursors.
 export function encodeMemoryCursor(rowId: number): string {
   if (!Number.isSafeInteger(rowId) || rowId < 0) throw new Error("Invalid memory cursor row id");
-  return btoa(JSON.stringify({ n: rowId })).replace(/=/g, "").replace(/\\+/g, "-").replace(/\\//g, "_");
+  return btoa(JSON.stringify({ n: rowId })).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 }
 export function decodeMemoryCursor(token: string): number | null {
   try {

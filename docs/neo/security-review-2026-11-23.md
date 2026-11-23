@@ -1,7 +1,7 @@
 # NEO security and integration review
 
 **Review date:** 2026-11-23  
-**Reviewed revision:** `fe162cc4a5816d625d03fbd451a384f71459cadf`  
+**Reviewed revision:** `9b7b62dfd2b91c72fafaae36a4c89bf3145a5209`  
 **Scope:** Repository-level review of the initial Cloudflare Worker, D1 schema, memory trust path, and client integration primitives.
 
 This is an engineering review of the checked-in source, not a third-party penetration test, Cloudflare deployment assessment, or production security certification. No live account, provider credential, D1 database, or device was accessed.
@@ -14,33 +14,27 @@ The repository now contains executable Worker handlers and starter Android/web t
 
 ### High — No enforceable API rate limits or model spend ceiling
 
-The Worker routes model inference and voice provider requests, but the checked-in implementation has no durable per-account request quota, token budget, daily/monthly spend ceiling, or provider circuit-breaker state. A valid enrolled device could repeatedly invoke billable endpoints. Worker-isolate memory is not an acceptable enforcement store because isolates are ephemeral and distributed.
+The Worker routes model inference and voice provider requests, but the checked-in implementation still has no durable per-account request quota, token budget, daily/monthly spend ceiling, or provider circuit-breaker state. A valid enrolled device could repeatedly invoke billable endpoints. Worker-isolate memory is not an acceptable enforcement store because isolates are ephemeral and distributed.
 
 **Required remediation:** Add a durable quota design (D1 transactional counters or a per-account Durable Object), explicit fail-closed budget policy, provider timeout/retry ceilings, and tests proving the cap cannot be bypassed by concurrent requests. Keep provider secrets unset until this is complete and owner-approved.
 
 ### High — Voice body limit is checked after full buffering
 
-`voiceRoute` calls `req.arrayBuffer()` before checking the 15 MB limit. An oversized request is therefore fully buffered before rejection. The generic JSON body limit does not protect this route.
-
-**Required remediation:** Reject an excessive declared Content-Length early and enforce a streaming byte limit while reading the body. Test missing, misleading, and oversized Content-Length cases.
+**Patched in this revision:** Access-signed request-body hashing and the voice proxy now use a bounded stream reader. Voice requests are capped at 15 MB; JSON bodies use a validated configured limit capped at 5 MB (default 1 MB). Tests cover the exact boundary, an over-limit streamed body, and an oversized declared Content-Length. The tests have not yet run on this PR head, and a full Worker upload test remains required.
 
 ### High — Authentication and D1 trust boundaries lack meaningful integration coverage
 
-The Worker test suite currently proves only the public health route and rejection of a protected route without a bearer token, plus pure cursor helper tests. It does not exercise valid/invalid Access JWT signatures, issuer/audience/expiry, device signatures, nonce replay, revocation, cross-account isolation, or D1-backed memory/task flows.
+The Worker test suite currently proves only the public health route and rejection of a protected route without a bearer token, plus pure cursor, model metadata, and bounded-body-reader helper tests. It does not exercise valid/invalid Access JWT signatures, issuer/audience/expiry, device signatures, nonce replay, revocation, cross-account isolation, or D1-backed memory/task flows.
 
 **Required remediation:** Build deterministic Worker tests with a fake D1 binding and generated P-256/RSA test keys. Cover both allowed and denied cases before staging.
 
 ### Medium — Device task claims do not enforce declared capabilities
 
-The task-claim query selects the oldest queued task for an account and leases it to the calling device without matching task requirements to `devices.capabilities_json`. This can assign work to a device that did not advertise the required capability.
-
-**Required remediation:** Define a validated capability schema and task capability requirement, then atomically claim only tasks the device is allowed and able to execute.
+**Patched in this revision:** Migration `0003_task_capabilities.sql` adds optional task capability requirements. Task creation validates up to 32 unique capability identifiers, and the claim query excludes tasks unless the claiming device advertises every required capability. This still needs D1-backed integration tests with multiple devices and mixed capabilities.
 
 ### Medium — Memory revision allocation is vulnerable to concurrent create conflicts
 
-Memory creation reads `MAX(revision)+1` and then inserts in a separate statement. Two concurrent requests for the same account and memory ID can calculate the same revision; one will fail at the primary key constraint. This is fail-safe against silent overwrite, but the API currently returns a generic bad request rather than a deterministic conflict/retry response.
-
-**Required remediation:** Make revision allocation atomic (for example, a D1 batch/transaction with a guarded insert strategy) and return a stable 409 conflict on contention. Add concurrent integration tests.
+**Patched in this revision:** Memory creation now allocates `MAX(revision)+1` inside the same `INSERT ... SELECT ... RETURNING` statement, removing the separate read/write race. A D1-backed concurrent-create test and stable conflict handling are still required.
 
 ### Medium — Provider tier metadata was derived from the candidate array index (patched; CI pending)
 
@@ -52,13 +46,13 @@ The model router previously calculated `tier` and fallback metadata from the loo
 
 The previous cursor used only `(updated_at, memory_id)`. Multiple immutable revisions can share the same second and memory ID, so a page boundary could skip rows. New writes inserted during pagination could also collide with the timestamp-based ordering.
 
-The Worker now uses the D1 implicit `rowid` of the append-only `memory_records` table as its opaque keyset cursor, returning records in insertion order. Cursor encode/decode validation has focused unit tests. This is not yet a D1 integration test; the assumption that memory rows are append-only must remain true. A database rebuild/restore that changes rowids must trigger a full client resynchronisation. GitHub Actions has not produced a check run for the updated PR head yet, so compilation and tests remain unverified for this patch.
+The Worker now uses the D1 implicit `rowid` of the append-only `memory_records` table as its opaque keyset cursor, returning records in insertion order. Cursor encode/decode validation has focused unit tests. This is not yet a D1 integration test; the assumption that memory rows are append-only must remain true. A database rebuild/restore that changes rowids must trigger a full client resynchronisation.
 
 ## Staging gate
 
 Do not deploy with real personal data or provider secrets until:
 
-1. The Worker TypeScript check and Vitest suite pass on the updated PR head.
+1. The Worker TypeScript check and Vitest suite pass on the updated PR head (not yet verified as of this review).
 2. The high-severity findings above are remediated and covered by tests.
 3. D1 migrations and concurrency tests pass against a disposable local/staging database.
 4. Access JWT, device proof, replay, revocation, and cross-account isolation tests pass.

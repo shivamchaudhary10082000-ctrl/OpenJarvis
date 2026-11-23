@@ -443,7 +443,7 @@ async function modelRoute(req:Request,env:Env,account:string):Promise<Response>{
   const configuredOutput=positiveConfig(env.MAX_OUTPUT_TOKENS)||1024;
   const requestedOutput=x.max_completion_tokens ?? x.max_tokens ?? configuredOutput;
   if (!Number.isSafeInteger(requestedOutput) || requestedOutput<1 || requestedOutput>configuredOutput) return fail(400,"invalid_token_limit","Requested output tokens exceed the configured per-request maximum");
-  const promptBytes=encoder.encode(JSON.stringify(x.messages)).byteLength;
+  const promptBytes=enc.encode(JSON.stringify(x.messages)).byteLength;
   const maxPromptBytes=positiveConfig(env.MAX_PROMPT_BYTES)||128_000;
   if(promptBytes>maxPromptBytes)return fail(413,"prompt_too_large","Prompt exceeds the configured byte limit");
   if(candidates.some(p=>!p.inputRate||!p.outputRate))return fail(503,"spend_pricing_unconfigured","Every eligible provider must have positive, reviewed input and output pricing before use");

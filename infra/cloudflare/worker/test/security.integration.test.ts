@@ -1,9 +1,9 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "cloudflare:workers";
-import worker from "../src/index";
+import worker, { type Env } from "../src/index";
 
 const encoder = new TextEncoder();
-const bindings = env as unknown as { ACCESS_TEAM_DOMAIN: string; ACCESS_AUD: string; DB: D1Database };
+const bindings = env as unknown as Env;
 const issuer = bindings.ACCESS_TEAM_DOMAIN.replace(/\/$/, "");
 const audience = bindings.ACCESS_AUD;
 const baseUrl = "https://neo.integration.test";
@@ -91,7 +91,7 @@ async function enrolDevice(
       public_key_jwk: publicJwk,
       capabilities,
     }),
-  }), env);
+  }), bindings);
   expect(response.status).toBe(201);
   return { id, account, token, privateKey: pair.privateKey };
 }
@@ -139,7 +139,7 @@ async function signedRequest(
 }
 
 async function call(device: TestDevice, path: string, init: RequestInit = {}): Promise<Response> {
-  return worker.fetch(await signedRequest(device, path, init), env);
+  return worker.fetch(await signedRequest(device, path, init), bindings);
 }
 
 function encryptedPayload(extra: Record<string, unknown> = {}) {
@@ -176,19 +176,19 @@ describe("D1-backed Access and device proof", () => {
     const badIssuer = await accessToken(account, { iss: "https://attacker.invalid" });
     const issuerResponse = await worker.fetch(new Request(baseUrl + "/v1/devices", {
       headers: { authorization: "Bearer " + badIssuer, "x-neo-device-id": device.id },
-    }), env);
+    }), bindings);
     expect(issuerResponse.status).toBe(401);
 
     const badAudience = await accessToken(account, { aud: "wrong-audience" });
     const audienceResponse = await worker.fetch(new Request(baseUrl + "/v1/devices", {
       headers: { authorization: "Bearer " + badAudience, "x-neo-device-id": device.id },
-    }), env);
+    }), bindings);
     expect(audienceResponse.status).toBe(401);
 
     const expired = await accessToken(account, { exp: 1 });
     const expiryResponse = await worker.fetch(new Request(baseUrl + "/v1/devices", {
       headers: { authorization: "Bearer " + expired, "x-neo-device-id": device.id },
-    }), env);
+    }), bindings);
     expect(expiryResponse.status).toBe(401);
 
     const valid = await accessToken(account);
@@ -196,16 +196,16 @@ describe("D1-backed Access and device proof", () => {
     const tampered = parts[0] + "." + parts[1] + "." + (parts[2].slice(0, -1) + (parts[2].endsWith("A") ? "B" : "A"));
     const signatureResponse = await worker.fetch(new Request(baseUrl + "/v1/devices", {
       headers: { authorization: "Bearer " + tampered, "x-neo-device-id": device.id },
-    }), env);
+    }), bindings);
     expect(signatureResponse.status).toBe(401);
   });
 
   it("accepts a valid device proof once and rejects a replayed nonce", async () => {
     const device = await enrolDevice("proof-" + crypto.randomUUID(), "Proof device");
     const request = await signedRequest(device, "/v1/devices");
-    const replay = new Request(request.clone());
-    expect((await worker.fetch(request, env)).status).toBe(200);
-    const replayResponse = await worker.fetch(replay, env);
+    const replay = request.clone();
+    expect((await worker.fetch(request, bindings)).status).toBe(200);
+    const replayResponse = await worker.fetch(replay, bindings);
     expect(replayResponse.status).toBe(401);
     expect(await replayResponse.json()).toMatchObject({
       error: { message: "Replayed device request" },
@@ -219,7 +219,7 @@ describe("D1-backed Access and device proof", () => {
     const crossAccount = await worker.fetch(await signedRequest(
       { ...first, id: second.id },
       "/v1/devices",
-    ), env);
+    ), bindings);
     expect(crossAccount.status).toBe(401);
 
     const ownDevices = await call(first, "/v1/devices");
@@ -353,7 +353,7 @@ describe("D1-backed encrypted memory and task concurrency", () => {
         body: JSON.stringify(encryptedPayload({ memory_id: "shared-memory", source_kind: "user-" + index })),
       }),
     ));
-    const responses = await Promise.all(requests.map(request => worker.fetch(request, env)));
+    const responses = await Promise.all(requests.map(request => worker.fetch(request, bindings)));
     const statuses = responses.map(response => response.status);
     expect(statuses).toEqual(Array(8).fill(201));
     const revisions = await Promise.all(responses.map(async response =>

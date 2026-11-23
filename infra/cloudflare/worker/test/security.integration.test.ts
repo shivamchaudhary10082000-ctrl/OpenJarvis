@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "cloudflare:workers";
 import worker, { cleanupExpiredDeviceNonces, type Env } from "../src/index";
-import { createDeviceIdentity } from "../../clients/web/neo-client";
+import { createDeviceIdentity, selectRecallableMemory } from "../../clients/web/neo-client";
 
 const encoder = new TextEncoder();
 const bindings = env as unknown as Env;
@@ -288,6 +288,27 @@ describe("D1-backed Access and device proof", () => {
     }
     const limited = await call(device, "/v1/devices");
     expect(limited.status).toBe(429);
+  });
+});
+
+describe("Offline memory recall selection", () => {
+  it("keeps approved revisions through pending updates and applies tombstones", () => {
+    const records = [
+      { memory_id: "a", revision: 1, trust_state: "approved", updated_at: 1 },
+      { memory_id: "a", revision: 2, trust_state: "pending", updated_at: 2 },
+      { memory_id: "b", revision: 1, trust_state: "approved", updated_at: 1 },
+      { memory_id: "b", revision: 2, trust_state: "deleted", updated_at: 2 },
+      { memory_id: "c", revision: 1, trust_state: "approved", updated_at: 1 },
+      { memory_id: "c", revision: 3, trust_state: "approved", updated_at: 3 },
+      { memory_id: "d", revision: 1, trust_state: "approved", updated_at: 1 },
+      { memory_id: "d", revision: 2, trust_state: "quarantined", updated_at: 2 },
+    ];
+    expect(selectRecallableMemory(records).map(record => [record.memory_id, record.revision])).toEqual([
+      ["a", 1], ["c", 3], ["d", 1],
+    ]);
+    expect(selectRecallableMemory(records, true).map(record => [record.memory_id, record.revision])).toEqual([
+      ["a", 1], ["a", 2], ["c", 3], ["d", 1],
+    ]);
   });
 });
 

@@ -244,6 +244,25 @@ async function route(req: Request, env: Env): Promise<Response> {
     return fail(400,"bad_request",message);
   }
 }
+export function modelRouteMetadata(
+  providerName: string,
+  primaryName: string,
+  automaticRouting: boolean,
+  primaryAvailable: boolean,
+  fallbackReason: string,
+  latencyMs: number,
+) {
+  const isPrimary = providerName === primaryName;
+  const fallbackUsed = automaticRouting && primaryAvailable && !isPrimary;
+  return {
+    tier: isPrimary ? "primary" : "backup",
+    fallback_used: fallbackUsed,
+    fallback_reason: fallbackUsed ? fallbackReason : null,
+    latency_ms: latencyMs,
+    account_scope: "private",
+  };
+}
+
 async function modelRoute(req:Request,env:Env,account:string):Promise<Response>{
   const x=await bodyJson<any>(req,env);
   if (!Array.isArray(x.messages) || x.messages.length<1 || x.messages.length>100) return fail(400,"invalid_messages","messages must contain 1–100 entries");
@@ -262,7 +281,7 @@ async function modelRoute(req:Request,env:Env,account:string):Promise<Response>{
       const response=await fetch(p.url!.replace(/\/$/,"")+"/chat/completions",{method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+p.key!},body:JSON.stringify({...x,model:p.name,stream:false}),signal:AbortSignal.timeout(60_000)});
       if(!response.ok){lastError="provider_http_"+response.status;if((response.status<500&&response.status!==429)||i===candidates.length-1) return fail(502,"provider_error",lastError);continue;}
       const payload=await response.json() as Record<string, unknown>;
-      return json({ ...payload, neo:{provider:p.name,model:p.name,tier:i===0?"primary":"backup",fallback_used:i>0,fallback_reason:i>0?lastError:null,latency_ms:Date.now()-started,account_scope:"private"}});
+      return json({ ...payload, neo:{provider:p.name,model:p.name,...modelRouteMetadata(p.name,primary.name,!explicit,Boolean(primary.url&&primary.key),lastError,Date.now()-started)}});
     }catch(e){lastError=e instanceof Error?e.name:"provider_network_error";if(explicit||i===candidates.length-1)return fail(502,"provider_error",lastError);}
   }
   return fail(502,"provider_error",lastError);

@@ -31,9 +31,9 @@ Voice requests require VOICE_TRANSCRIBE_MAX_COST_USD_MICROS or VOICE_SYNTHESIS_M
 
 ## Local validation
 
-Run npm install, npm run check and npm test.
+Run npm install, Redocly OpenAPI lint, npm run check, npm run deploy:dry-run and npm test.
 
-Vitest runs in the Cloudflare Workers runtime with local SQLite-backed D1 and applies migrations 0001–0008. Latest verified run #60 passed: 2 test files, 40 tests, TypeScript check and npm dependency audit. This is local integration evidence, not remote D1 or staging proof.
+Vitest runs in the Cloudflare Workers runtime with local SQLite-backed D1 and applies migrations 0001–0008. Latest verified run #69 passed: Redocly lint (no warnings), TypeScript check, Wrangler deploy dry-run, npm audit (0 vulnerabilities) and 2 test files / 40 tests. The dry-run built a 43.34 KiB Worker (10.42 KiB gzip). This is local integration evidence, not remote D1 or staging proof.
 
 ## Offline clients
 

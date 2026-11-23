@@ -19,9 +19,13 @@ const fail = (status: number, code: string, message: string) => json({ error: { 
 const b64u = (s: string) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - s.length % 4) % 4)), c => c.charCodeAt(0));
 const enc = new TextEncoder();
 const now = () => Math.floor(Date.now() / 1000);
+function jsonBodyLimit(env: Env): number {
+  const configured = Number(env.MAX_BODY_BYTES || 1_000_000);
+  return Number.isSafeInteger(configured) && configured > 0 ? Math.min(configured, 5_000_000) : 1_000_000;
+}
 function urlPathBodyLimit(req: Request, env: Env): number {
   const path = new URL(req.url).pathname.replace(/^\\/v1/, "");
-  return path.startsWith("/voice/") ? 15_000_000 : Number(env.MAX_BODY_BYTES || 1_000_000);
+  return path.startsWith("/voice/") ? 15_000_000 : jsonBodyLimit(env);
 }
 export async function readRequestBodyBounded(req: Request, maxBytes: number): Promise<Uint8Array> {
   const declared = req.headers.get("content-length");
@@ -124,7 +128,7 @@ async function authenticate(req: Request, env: Env): Promise<{ account: string; 
   return { account, device: row };
 }
 async function bodyJson<T>(req: Request, env: Env): Promise<T> {
-  const max = Number(env.MAX_BODY_BYTES || 1_000_000);
+  const max = jsonBodyLimit(env);
   const declaredLength = Number(req.headers.get("content-length") || 0);
   if (declaredLength > max) throw new Error("Request body too large");
   const raw = await readRequestBodyBounded(req, max);

@@ -18,7 +18,7 @@ This report separates source implementation from tested behavior and from produc
 | Encrypted memory API | Implemented | Client-encrypted immutable revisions, pending-by-default writes, approval into a new revision, tombstones, base64url wire serialization and opaque rowid sync cursor. |
 | Offline replay safety | Implemented | Idempotency keys and request hashes for memory writes and task enqueue. Reusing a key with different content returns 409. |
 | Task delegation | Implemented | Capability-aware claims, expiring leases, concurrent-claim protection, and lease expiry recovery when another device claims. |
-| Device coordination | Implemented | Authenticated heartbeat and online/offline freshness indicator (90-second window); any authenticated request also refreshes last-seen time. |
+| Device coordination | Implemented | Authenticated heartbeat and online/offline freshness indicator (90-second window); any authenticated request also refreshes last-seen time. Expired device nonces are removed by a 15-minute scheduled Worker cleanup. |
 | Provider spend controls | Implemented, fail-closed | Per-account monthly USD-micro cap; per-provider input/output pricing; prompt byte and per-request output-token ceilings; monthly input/output token caps; atomic D1 reservations and settlement triggers. |
 | Voice spend controls | Implemented, fail-closed | Voice transcription/synthesis require a reviewed maximum per-request cost and share the monthly spend cap. |
 | Model routing | Implemented | Primary/backup routing, explicit model no-fallback behavior, auto, allow_fallback=false, and provider/tier/fallback metadata. |
@@ -30,17 +30,17 @@ This report separates source implementation from tested behavior and from produc
 
 Latest NEO Worker run at the time of this report:
 
-- Workflow run #53: **Success**
-- Tested commit: 0e2ba33f2da377d264fc7ae0aa13cd82e13123ce
+- Workflow run #60: **Success**
+- Tested commit: 2047877723ae28c176ea0be973c2d46898e1d800
 - npm install --ignore-scripts: passed; npm reported 0 vulnerabilities.
 - npm run check: passed.
 - npm test: passed.
-- Vitest: **2 test files, 39 tests passed**.
+- Vitest: **2 test files, 40 tests passed**.
 
 D1-backed integration coverage includes:
 - Valid/invalid Access JWT signature, issuer, audience and expiry.
 - Device signature, nonce replay, cross-account isolation, enrolment and revocation.
-- Device online/offline presence and heartbeat.
+- Device online/offline presence, heartbeat and scheduled expired-nonce cleanup.
 - D1 rate limiting.
 - Concurrent memory revision allocation and memory idempotency.
 - Task idempotency, capability filtering, competing leases and expired-lease recovery.

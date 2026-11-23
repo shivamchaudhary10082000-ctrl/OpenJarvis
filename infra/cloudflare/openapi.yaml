@@ -23,6 +23,8 @@ paths:
       security: []
       summary: Liveness check
       responses:
+        "4XX":
+          description: Invalid health-check request.
         "200":
           description: Service is alive
           content:
@@ -44,6 +46,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "4XX":
+          description: Client request rejected.
         "200":
           description: Registered devices
           content:
@@ -100,6 +104,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "4XX":
+          description: Client request rejected.
         "200":
           description: Device heartbeat accepted
           content:

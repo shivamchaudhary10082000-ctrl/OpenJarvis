@@ -24,7 +24,7 @@ function jsonBodyLimit(env: Env): number {
   return Number.isSafeInteger(configured) && configured > 0 ? Math.min(configured, 5_000_000) : 1_000_000;
 }
 function urlPathBodyLimit(req: Request, env: Env): number {
-  const path = new URL(req.url).pathname.replace(/^\\/v1/, "");
+  const path = new URL(req.url).pathname.replace(/^\/v1/, "");
   return path.startsWith("/voice/") ? 15_000_000 : jsonBodyLimit(env);
 }
 export async function readRequestBodyBounded(req: Request, maxBytes: number): Promise<Uint8Array> {

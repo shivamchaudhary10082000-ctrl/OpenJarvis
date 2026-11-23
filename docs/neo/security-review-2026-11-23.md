@@ -7,7 +7,7 @@ This is not a third-party penetration test, production certification, remote D1 
 
 ## Executive verdict
 
-**Partial — not release ready.** The source now includes meaningful security boundaries and 39 passing local Worker tests. It also includes fail-closed financial/token budgets and ciphertext-only offline queues. However, no remote resources are deployed, real provider behavior is untested, Android is not built/tested on a device, and operational recovery/security controls remain incomplete.
+**Partial — not release ready.** The source now includes meaningful security boundaries and 40 passing local Worker tests. It also includes fail-closed financial/token budgets and ciphertext-only offline queues. However, no remote resources are deployed, real provider behavior is untested, Android is not built/tested on a device, and operational recovery/security controls remain incomplete.
 
 ## Controls implemented and tested locally
 
@@ -20,7 +20,7 @@ This is not a third-party penetration test, production certification, remote D1 
 - Task idempotency, capability-aware claims, concurrent lease race and expired-lease recovery.
 - Atomic monthly spend reservations, concurrent reservation cap, settlement guard and monthly token-budget reservations.
 - Primary/backup failover, explicit model no-fallback, allow_fallback=false, provider network failure and mocked voice transcription/synthesis.
-- CI run #53 passed on commit 0e2ba33f2da377d264fc7ae0aa13cd82e13123ce: TypeScript check and 39 tests.
+- CI run #60 passed on commit 2047877723ae28c176ea0be973c2d46898e1d800: TypeScript check and 40 tests.
 
 ## Residual findings
 
@@ -66,7 +66,7 @@ Web IndexedDB and Android SQLite persist encrypted memory/task outbox items with
 
 ### Medium — D1 and device operational hygiene
 
-Nonce records and spend reservations require retention/cleanup and operator monitoring. Device presence is refreshed by signed requests and a 90-second heartbeat window, but there is no autonomous health monitor or durable device capability grant/revocation workflow.
+Expired device nonces are removed by a 15-minute scheduled Worker task. Settled spend reservations are retained for audit; held reservations still require operator reconciliation. Device presence is refreshed by signed requests and a 90-second heartbeat window, but there is no autonomous health monitor or durable device capability grant/revocation workflow.
 
 ## Security boundary and deployment decision
 

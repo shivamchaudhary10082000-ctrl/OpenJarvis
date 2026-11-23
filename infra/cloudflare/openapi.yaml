@@ -211,10 +211,10 @@ paths:
                   pattern: '^[a-z][a-z0-9_.-]{1,63}$'
                 payload_ciphertext:
                   type: string
-                  contentEncoding: base64
+                  contentEncoding: base64url
                 payload_nonce:
                   type: string
-                  contentEncoding: base64
+                  contentEncoding: base64url
                 key_version:
                   type: integer
                   minimum: 1
@@ -281,10 +281,10 @@ paths:
                             type: integer
                           payload_ciphertext:
                             type: string
-                            contentEncoding: base64
+                            contentEncoding: base64url
                           payload_nonce:
                             type: string
-                            contentEncoding: base64
+                            contentEncoding: base64url
                           key_version:
                             type: integer
         "429":
@@ -526,10 +526,10 @@ components:
           type: string
         payload_ciphertext:
           type: string
-          contentEncoding: base64
+          contentEncoding: base64url
         payload_nonce:
           type: string
-          contentEncoding: base64
+          contentEncoding: base64url
         key_version:
           type: integer
           minimum: 1
@@ -539,7 +539,7 @@ components:
       allOf:
         - $ref: "#/components/schemas/EncryptedMemoryInput"
         - type: object
-          required: [revision, trust_state, created_at, updated_at]
+          required: [revision, trust_state, updated_at]
           properties:
             revision:
               type: integer

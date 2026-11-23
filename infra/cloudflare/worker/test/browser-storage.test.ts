@@ -59,7 +59,7 @@ describe("browser IndexedDB persistence and recovery", () => {
 
     const recovered = await NeoDeviceClient.create("https://neo.test", token, scope);
     const isolated = await NeoDeviceClient.create("https://neo.test", token, account());
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ memory_id: "memory-offline" }), { status: 201 }));
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ memory_id: "memory-offline" }), { status: 201 }));
     vi.stubGlobal("fetch", fetchMock);
 
     expect(await isolated.flushOutbox()).toMatchObject({ sent: 0, remaining: 0 });

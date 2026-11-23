@@ -305,7 +305,13 @@ async function route(req: Request, env: Env): Promise<Response> {
       const task=await env.DB.prepare("SELECT t.task_id,t.task_kind,t.payload_ciphertext,t.payload_nonce,t.key_version FROM task_leases t JOIN devices d ON d.device_id=? AND d.account_id=t.account_id WHERE t.account_id=? AND t.state='queued' AND NOT EXISTS (SELECT 1 FROM json_each(t.required_capabilities_json) required WHERE NOT EXISTS (SELECT 1 FROM json_each(d.capabilities_json) available WHERE available.value=required.value)) ORDER BY t.created_at LIMIT 1").bind(device.device_id,account).first<any>();
       if (!task) return json({task:null});
       const updated=await env.DB.prepare("UPDATE task_leases SET state='leased',assigned_device_id=?,lease_expires_at=?,updated_at=? WHERE task_id=? AND state='queued'").bind(device.device_id,t+leaseSeconds,t,task.task_id).run();
-      return updated.meta.changes ? json({task:{...task,state:"leased",lease_expires_at:t+leaseSeconds}}) : json({task:null});
+      return updated.meta.changes ? json({task:{
+        ...task,
+        payload_ciphertext: encodeBytesBase64Url(new Uint8Array(task.payload_ciphertext)),
+        payload_nonce: encodeBytesBase64Url(new Uint8Array(task.payload_nonce)),
+        state:"leased",
+        lease_expires_at:t+leaseSeconds,
+      }}) : json({task:null});
     }
     const taskPath=path.match(/^\/tasks\/([0-9a-f-]{36})$/);
     if (taskPath && req.method==="GET") {

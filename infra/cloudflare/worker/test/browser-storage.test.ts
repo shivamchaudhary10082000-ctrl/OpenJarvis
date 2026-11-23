@@ -94,6 +94,17 @@ describe("browser IndexedDB persistence and recovery", () => {
     expect(body).not.toHaveProperty("plaintext");
   });
 
+  it("supports Cloudflare Access cookie sessions without a JavaScript token callback", async () => {
+    const client = await NeoDeviceClient.create("https://neo.test", undefined, account());
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await client.request("/health");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get("authorization")).toBeNull();
+  });
+
   it("uses a fresh host-provided access token per request without persisting it", async () => {
     const scope = account();
     let issued = 0;

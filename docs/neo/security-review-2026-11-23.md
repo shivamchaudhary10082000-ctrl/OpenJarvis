@@ -1,7 +1,7 @@
 # NEO security and integration review
 
 **Review date:** 2026-11-23  
-**Reviewed revision:** `54261f0aa6bbef6f239ce8bf60a223ee2dfe26bf`  
+**Reviewed revision:** `bfc429f77b0756258aa06f92014311db810704df`  
 **Scope:** Repository-level review of the initial Cloudflare Worker, D1 schema, memory trust path, and client integration primitives.
 
 This is an engineering review of the checked-in source, not a third-party penetration test, Cloudflare deployment assessment, or production security certification. No live account, provider credential, D1 database, or device was accessed.
@@ -12,11 +12,13 @@ The repository now contains executable Worker handlers and starter Android/web t
 
 ## Findings
 
-### High — No enforceable API rate limits or model spend ceiling
+### High — No hard provider spend ceiling; request rate limit added, D1 integration tests pending
 
-The Worker routes model inference and voice provider requests, but the checked-in implementation still has no durable per-account request quota, token budget, daily/monthly spend ceiling, or provider circuit-breaker state. A valid enrolled device could repeatedly invoke billable endpoints. Worker-isolate memory is not an acceptable enforcement store because isolates are ephemeral and distributed.
+**Patched in this revision:** A D1-backed fixed-window per-account rate limiter now applies to authenticated device requests and first-device enrolment (default 60 requests/minute, configurable up to 600). SQLite-level validation confirmed the counter rejects request 61 and resets in the next minute. This still needs a real D1 integration test.
 
-**Required remediation:** Add a durable quota design (D1 transactional counters or a per-account Durable Object), explicit fail-closed budget policy, provider timeout/retry ceilings, and tests proving the cap cannot be bypassed by concurrent requests. Keep provider secrets unset until this is complete and owner-approved.
+**Still unresolved:** There is no durable token budget or hard daily/monthly provider spend ceiling. Rate limiting alone does not cap financial exposure. A valid enrolled device can still consume a large amount within the allowed request rate.
+
+**Required remediation:** Define the provider, model pricing, maximum request/output sizes, and owner-approved monthly budget; then implement a fail-closed D1 reservation/reconciliation design and concurrent cap tests. Keep provider secrets unset until this is complete and owner-approved.
 
 ### High — Voice body limit is checked after full buffering
 
@@ -53,11 +55,12 @@ The Worker now uses the D1 implicit `rowid` of the append-only `memory_records` 
 Do not deploy with real personal data or provider secrets until:
 
 1. The Worker TypeScript check and Vitest suite pass on the updated PR head (not yet verified as of this review).
-2. The high-severity findings above are remediated and covered by tests.
-3. D1 migrations and concurrency tests pass against a disposable local/staging database.
-4. Access JWT, device proof, replay, revocation, and cross-account isolation tests pass.
-5. Synthetic-data staging validation and rollback are documented.
-6. The owner explicitly approves external Cloudflare resources and provider spending.
+2. The D1-backed rate-limit and spend-budget enforcement tests pass.
+3. The remaining high-severity findings above are remediated and covered by tests.
+4. D1 migrations and concurrency tests pass against a disposable local/staging database.
+5. Access JWT, device proof, replay, revocation, and cross-account isolation tests pass.
+6. Synthetic-data staging validation and rollback are documented.
+7. The owner explicitly approves external Cloudflare resources and provider spending.
 
 ## Explicitly not performed
 

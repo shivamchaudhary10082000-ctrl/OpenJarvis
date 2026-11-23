@@ -87,14 +87,9 @@ class NeoAndroidClient(
         return signedRequest("GET", "/memory$query")
     }
 
-    suspend fun transcribeMultipart(fileName: String, mimeType: String, audio: ByteArray): okhttp3.Response {
-        val boundary = "neo-" + UUID.randomUUID().toString()
-        val prefix = "--$boundary\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-1\r\n" +
-            "--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"$fileName\"\r\nContent-Type: $mimeType\r\n\r\n"
-        val suffix = "\r\n--$boundary--\r\n"
-        val body = prefix.toByteArray() + audio + suffix.toByteArray()
-        return signedRequest("POST", "/voice/transcribe", body, "multipart/form-data; boundary=$boundary")
-    }
+    suspend fun transcribe(audio: ByteArray, mimeType: String = "audio/webm"): okhttp3.Response =
+        signedRequest("POST", "/voice/transcribe", audio, mimeType)
+
 
     suspend fun synthesize(jsonBody: String): okhttp3.Response =
         signedRequest("POST", "/voice/synthesize", jsonBody.toByteArray(), "application/json")

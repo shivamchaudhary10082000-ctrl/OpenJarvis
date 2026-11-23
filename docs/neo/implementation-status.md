@@ -76,3 +76,13 @@ Input-token reservation uses serialized request bytes as a conservative upper bo
 ## Release decision
 
 Keep PR #1 as **Draft**. Do not merge or deploy yet. The Worker foundation now has meaningful local D1 security/concurrency coverage and fail-closed spend/token controls, but staging, real provider testing, Android device validation, browser hardening, recovery operations and independent security review remain release blockers.
+
+
+## 2026-11-24 validation expansion (CI pending)
+
+- Desktop lockfile now pins `cookie 0.18.3` with the checksum from the crates.io index; the next repository security workflow must confirm the advisory gate is clean and the desktop build remains compatible.
+- Added `infra/cloudflare/clients/android-test-harness`: Gradle app harness, Robolectric SQLite/outbox/account-isolation tests, and Android emulator Keystore identity persistence test. CI has been added; this is not yet evidence of a physical handset pass.
+- Added Playwright native-browser persistence tests for Chromium, Firefox and WebKit. They exercise the real web client in browser contexts and test CryptoKey IndexedDB persistence, cache recovery and encrypted outbox replay after reload. CI has been added; browser results are pending.
+- No remote Cloudflare resources were provisioned. Remote D1 migrations, export, rollback, restore and cleanup remain blocked on an authorised disposable Cloudflare account and owner-controlled credentials.
+- No independent penetration test was performed. A third-party tester must execute and report the assessment; internal CI is not a substitute.
+

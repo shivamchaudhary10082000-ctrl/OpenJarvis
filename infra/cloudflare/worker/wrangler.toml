@@ -5,6 +5,8 @@ workers_dev = true
 
 [vars]
 NEO_ENV = "staging"
+MAX_REQUESTS_PER_MINUTE = "60"
+MAX_BODY_BYTES = "1000000"
 ACCESS_TEAM_DOMAIN = "https://replace-with-your-team.cloudflareaccess.com"
 ACCESS_AUD = "replace-with-access-application-audience"
 MODEL_PRIMARY_NAME = "unset"

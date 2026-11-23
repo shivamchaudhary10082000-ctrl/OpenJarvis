@@ -40,6 +40,10 @@ paths:
       parameters:
         - $ref: "#/components/parameters/DeviceId"
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "200":
           description: Registered devices
           content:
@@ -92,6 +96,10 @@ paths:
       operationId: heartbeatDevice
       summary: Refresh the authenticated device's online presence
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "200":
           description: Device heartbeat accepted
           content:
@@ -142,6 +150,10 @@ paths:
             type: boolean
             default: false
       responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "200":
           description: Encrypted memory changes
           content:
@@ -562,6 +574,10 @@ components:
             properties:
               error:
                 type: string
+    Unauthorized:
+      description: Access JWT or device proof is invalid, expired or revoked.
+    RateLimited:
+      description: Per-account request limit or budget limit reached.
   schemas:
     DeviceEnrollment:
       type: object

@@ -134,6 +134,11 @@ async function bodyJson<T>(req: Request, env: Env): Promise<T> {
   const raw = await readRequestBodyBounded(req, max);
   return JSON.parse(new TextDecoder().decode(raw)) as T;
 }
+export function isValidCapabilityList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length <= 32 &&
+    value.every((item: unknown) => typeof item === "string" && /^[a-z][a-z0-9_.-]{0,63}$/.test(item)) &&
+    new Set(value).size === value.length;
+}
 function validCipher(x: any): boolean {
   return typeof x?.payload_ciphertext === "string" && x.payload_ciphertext.length >= 16 &&
     typeof x?.payload_nonce === "string" && x.payload_nonce.length >= 12 &&
@@ -157,7 +162,7 @@ async function route(req: Request, env: Env): Promise<Response> {
           !["android","ios","windows","macos","linux","browser","other"].includes(x.platform) ||
           !x.public_key_jwk || x.public_key_jwk.kty !== "EC" || x.public_key_jwk.crv !== "P-256" ||
           typeof x.public_key_jwk.x !== "string" || typeof x.public_key_jwk.y !== "string" ||
-          !Array.isArray(x.capabilities)) return fail(400, "invalid_device", "Invalid device registration");
+          !isValidCapabilityList(x.capabilities)) return fail(400, "invalid_device", "Invalid device registration");
       await env.DB.prepare("INSERT OR IGNORE INTO accounts(account_id, created_at, status) VALUES(?, ?, 'active')").bind(claims.sub, now()).run();
       await env.DB.prepare("INSERT INTO devices(device_id, account_id, label, platform, public_key_jwk, capabilities_json, created_at) VALUES(?,?,?,?,?,?,?)")
         .bind(deviceId, claims.sub, x.label, x.platform, JSON.stringify(x.public_key_jwk), JSON.stringify(x.capabilities.slice(0,32)), now()).run();
@@ -179,7 +184,7 @@ async function route(req: Request, env: Env): Promise<Response> {
     }
     if (path === "/devices" && req.method === "POST") {
       const x = await bodyJson<any>(req, env);
-      if (typeof x.label !== "string" || x.label.length < 1 || x.label.length > 80 || !["android","ios","windows","macos","linux","browser","other"].includes(x.platform) || !x.public_key_jwk || x.public_key_jwk.kty !== "EC" || x.public_key_jwk.crv !== "P-256" || !Array.isArray(x.capabilities)) return fail(400,"invalid_device","Invalid device registration");
+      if (typeof x.label !== "string" || x.label.length < 1 || x.label.length > 80 || !["android","ios","windows","macos","linux","browser","other"].includes(x.platform) || !x.public_key_jwk || x.public_key_jwk.kty !== "EC" || x.public_key_jwk.crv !== "P-256" || !isValidCapabilityList(x.capabilities)) return fail(400,"invalid_device","Invalid device registration");
       const deviceId = req.headers.get("x-neo-device-id") || id().replace(/-/g,"");
       await env.DB.prepare("INSERT INTO devices(device_id, account_id, label, platform, public_key_jwk, capabilities_json, created_at) VALUES(?,?,?,?,?,?,?)").bind(deviceId,account,x.label,x.platform,JSON.stringify(x.public_key_jwk),JSON.stringify(x.capabilities.slice(0,32)),now()).run();
       await env.DB.prepare("INSERT INTO audit_events(event_id,account_id,device_id,event_type,created_at) VALUES(?,?,?,?,?)").bind(id(),account,deviceId,"device.enrolled",now()).run();

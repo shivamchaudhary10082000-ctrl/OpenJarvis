@@ -1,7 +1,7 @@
 # NEO security and integration review
 
 **Review date:** 2026-11-23  
-**Reviewed revision:** `2f4f0db87030704535e993b6a6a9f384182ef5e3`  
+**Reviewed revision:** `0005e05b4134eb76b2cd0b88dd8d32b5fd24467b`  
 **Scope:** Repository-level review of the initial Cloudflare Worker, D1 schema, memory trust path, and client integration primitives.
 
 This is an engineering review of the checked-in source, not a third-party penetration test, Cloudflare deployment assessment, or production security certification. No live account, provider credential, D1 database, or device was accessed.

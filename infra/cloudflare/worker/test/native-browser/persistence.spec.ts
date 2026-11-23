@@ -44,9 +44,17 @@ test("encrypted memory cache survives reload and offline recovery", async ({ pag
   await page.goto("/");
   const scope = newScope();
   await page.route("https://neo.test/**", async (route) => {
+    if (route.request().method() === "OPTIONS") {
+      await route.fulfill({ status: 204, headers: {
+        "access-control-allow-origin": "*",
+        "access-control-allow-methods": "GET, POST, OPTIONS",
+        "access-control-allow-headers": "authorization, content-type, x-neo-device-id, x-neo-timestamp, x-neo-nonce, x-neo-signature, idempotency-key",
+      } });
+      return;
+    }
     await route.fulfill({
       status: 200,
-      contentType: "application/json",
+      headers: { "access-control-allow-origin": "*", "content-type": "application/json" },
       body: JSON.stringify({
         records: [{
           memory_id: "native-memory", revision: 1, trust_state: "approved", updated_at: 10,
@@ -81,7 +89,15 @@ test("ciphertext outbox survives reload and replays with the original idempotenc
   await page.route("https://neo.test/**", async (route) => {
     capturedKey = route.request().headers()["idempotency-key"] ?? null;
     capturedBody = route.request().postDataJSON();
-    await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ accepted: true }) });
+    if (route.request().method() === "OPTIONS") {
+      await route.fulfill({ status: 204, headers: {
+        "access-control-allow-origin": "*",
+        "access-control-allow-methods": "GET, POST, OPTIONS",
+        "access-control-allow-headers": "authorization, content-type, x-neo-device-id, x-neo-timestamp, x-neo-nonce, x-neo-signature, idempotency-key",
+      } });
+      return;
+    }
+    await route.fulfill({ status: 201, headers: { "access-control-allow-origin": "*", "content-type": "application/json" }, body: JSON.stringify({ accepted: true }) });
   });
   await page.reload();
   const result = await page.evaluate(async (s) => (await window.neoTest.create(s)).flushOutbox(), scope);

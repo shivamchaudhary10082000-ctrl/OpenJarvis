@@ -7,7 +7,7 @@ This is not a third-party penetration test, production certification, remote D1 
 
 ## Executive verdict
 
-**Partial — not release ready.** The source now includes meaningful security boundaries and 40 passing local Worker tests. It also includes fail-closed financial/token budgets and ciphertext-only offline queues. However, no remote resources are deployed, real provider behavior is untested, Android is not built/tested on a device, and operational recovery/security controls remain incomplete.
+**Partial — not release ready.** The source now includes meaningful security boundaries and 43 passing local Worker tests. It also includes fail-closed financial/token budgets and ciphertext-only offline queues. However, no remote resources are deployed, real provider behavior is untested, Android is not built/tested on a device, and operational recovery/security controls remain incomplete.
 
 ## Controls implemented and tested locally
 
@@ -20,7 +20,7 @@ This is not a third-party penetration test, production certification, remote D1 
 - Task idempotency, capability-aware claims, concurrent lease race and expired-lease recovery.
 - Atomic monthly spend reservations, concurrent reservation cap, settlement guard and monthly token-budget reservations.
 - Primary/backup failover, explicit model no-fallback, allow_fallback=false, provider network failure and mocked voice transcription/synthesis.
-- CI run #71 passed on commit 6c3c03896585d826b29e1d7a96a58ae57b588be3: Redocly OpenAPI lint, TypeScript check, Wrangler deployment dry-run and 40 tests.
+- CI run #87 passed on commit 2297ddfd492410047fc2ea4ed8e9675b615ec25f: Redocly OpenAPI lint, TypeScript check, Wrangler deployment dry-run and 43 tests.
 
 ## Residual findings
 
@@ -52,7 +52,7 @@ The tests verify routing and request accounting against mocks. They do not estab
 
 ### Medium — Browser same-origin script execution remains a risk
 
-The web client keeps its P-256 private key non-exportable in IndexedDB and stores encrypted payloads in a per-device cache/outbox. Non-exportable storage does not protect against same-origin XSS that can invoke signing or read Access tokens.
+The web client re-imports its P-256 private key as non-exportable before persistence, and namespaces identity/cache/outbox by a hashed account scope. The Android starter similarly scopes its Keystore alias, SharedPreferences device ID and SQLite database by account. Non-exportable storage does not protect against same-origin XSS that can invoke signing or read Access tokens.
 
 **Required:** Strict CSP, dependency pinning/audit, Trusted Types where applicable, no unsafe inline scripts, secure Access-token lifecycle, recovery/re-enrolment and browser persistence tests.
 

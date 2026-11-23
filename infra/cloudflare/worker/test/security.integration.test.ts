@@ -757,6 +757,52 @@ describe("D1-backed encrypted memory and task concurrency", () => {
 
 
 describe("D1 spend ledger invariants", () => {
+  it("conservatively reconciles stale reservations once and leaves fresh requests untouched", async () => {
+    const device = await enrolDevice("spend-reconcile-" + crypto.randomUUID(), "Spend reconciliation device");
+    const timestamp = Math.floor(Date.now() / 1000);
+    const month = new Date(timestamp * 1000).toISOString().slice(0, 7);
+    await bindings.DB.prepare(
+      "INSERT INTO provider_spend_usage(account_id,month_key,budget_microusd,monthly_input_token_limit,monthly_output_token_limit,reserved_microusd,spent_microusd,reserved_input_tokens,reserved_output_tokens,input_tokens,output_tokens,updated_at) VALUES(?,?,1000,100,100,0,0,0,0,0,0,?)",
+    ).bind(device.account, month, timestamp).run();
+
+    const staleId = crypto.randomUUID();
+    const freshId = crypto.randomUUID();
+    await bindings.DB.prepare(
+      "INSERT INTO provider_spend_reservations(reservation_id,account_id,month_key,reserved_microusd,reserved_input_tokens,reserved_output_tokens,state,provider_label,created_at) VALUES(?,?,?,250,10,20,'reserved','stale-provider',?)",
+    ).bind(staleId, device.account, month, timestamp - 3601).run();
+    await bindings.DB.prepare(
+      "INSERT INTO provider_spend_reservations(reservation_id,account_id,month_key,reserved_microusd,reserved_input_tokens,reserved_output_tokens,state,provider_label,created_at) VALUES(?,?,?,100,5,5,'reserved','fresh-provider',?)",
+    ).bind(freshId, device.account, month, timestamp).run();
+
+    expect(await reconcileStaleProviderSpendReservations(bindings, timestamp - 1800, timestamp)).toBe(1);
+    const stale = await bindings.DB.prepare(
+      "SELECT state,settled_microusd,settled_input_tokens,settled_output_tokens FROM provider_spend_reservations WHERE reservation_id=?",
+    ).bind(staleId).first<{state:string;settled_microusd:number;settled_input_tokens:number;settled_output_tokens:number}>();
+    expect(stale).toEqual({
+      state: "settled",
+      settled_microusd: 250,
+      settled_input_tokens: 10,
+      settled_output_tokens: 20,
+    });
+    const fresh = await bindings.DB.prepare(
+      "SELECT state FROM provider_spend_reservations WHERE reservation_id=?",
+    ).bind(freshId).first<{state:string}>();
+    expect(fresh?.state).toBe("reserved");
+
+    const usage = await bindings.DB.prepare(
+      "SELECT reserved_microusd,spent_microusd,reserved_input_tokens,reserved_output_tokens,input_tokens,output_tokens FROM provider_spend_usage WHERE account_id=? AND month_key=?",
+    ).bind(device.account, month).first<Record<string, number>>();
+    expect(usage).toEqual({
+      reserved_microusd: 100,
+      spent_microusd: 250,
+      reserved_input_tokens: 5,
+      reserved_output_tokens: 5,
+      input_tokens: 10,
+      output_tokens: 20,
+    });
+    expect(await reconcileStaleProviderSpendReservations(bindings, timestamp - 1800, timestamp + 1)).toBe(0);
+  });
+
   it("admits only reservations that fit under the monthly cap under concurrency", async () => {
     const account = "spend-race-" + crypto.randomUUID();
     const month = new Date().toISOString().slice(0, 7);

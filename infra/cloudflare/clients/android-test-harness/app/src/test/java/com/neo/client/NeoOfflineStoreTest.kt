@@ -4,8 +4,10 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 import java.util.UUID
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class NeoOfflineStoreTest {
     private fun key() = UUID.randomUUID().toString().replace("-", "")
     @Test fun ciphertextOutboxSurvivesStoreReconstruction() {

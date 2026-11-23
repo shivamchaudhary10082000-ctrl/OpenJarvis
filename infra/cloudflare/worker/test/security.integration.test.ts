@@ -220,7 +220,7 @@ describe("D1-backed Access and device proof", () => {
       { ...first, id: second.id },
       "/v1/devices",
     ), bindings);
-    expect(crossAccount.status).toBe(401);
+    expect(crossAccount.status).toBe(403);
 
     const ownDevices = await call(first, "/v1/devices");
     expect(ownDevices.status).toBe(200);

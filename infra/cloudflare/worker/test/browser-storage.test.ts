@@ -93,4 +93,41 @@ describe("browser IndexedDB persistence and recovery", () => {
     expect(body).toMatchObject({ payload_ciphertext: "encrypted-content", payload_nonce: "nonce" });
     expect(body).not.toHaveProperty("plaintext");
   });
+
+  it("uses a fresh host-provided access token per request without persisting it", async () => {
+    const scope = account();
+    let issued = 0;
+    const accessToken = async () => `ephemeral-access-token-${++issued}`;
+    const client = await NeoDeviceClient.create("https://neo.test", accessToken, scope);
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await client.request("/health");
+    await client.request("/health");
+
+    expect(issued).toBe(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get("authorization"))
+      .toBe("Bearer ephemeral-access-token-1");
+    expect(new Headers(fetchMock.mock.calls[1][1]?.headers).get("authorization"))
+      .toBe("Bearer ephemeral-access-token-2");
+
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("neo-device-identity", 2);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      const stores = Array.from(db.objectStoreNames);
+      const tx = db.transaction(stores, "readonly");
+      const values = await Promise.all(stores.map((storeName) => new Promise<unknown[]>((resolve, reject) => {
+        const request = tx.objectStore(storeName).getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      })));
+      expect(JSON.stringify(values)).not.toContain("ephemeral-access-token-");
+    } finally {
+      db.close();
+    }
+  });
 });

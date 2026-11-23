@@ -1,52 +1,82 @@
 # NEO implementation status
 
 **As of:** 2026-11-23  
-**Working branch:** `neo/foundation-architecture`  
-**Pull request:** #1 (Draft)  
-**Deployment status:** Not deployed. No Cloudflare resources, provider credentials, paid inference, DNS, or real devices have been activated.
+**Working branch:** neo/foundation-architecture  
+**Pull request:** #1 — Draft, open, not merged  
+**Deployment:** Not deployed. No Cloudflare resources, provider credentials, paid inference, DNS, or real devices have been activated.
 
-This is a source-code and integration status report, not a claim that NEO is production-ready.
+This report separates source implementation from tested behavior and from production readiness.
 
-## Implemented in the repository
+## Implemented in source
 
-| Area | Current state | Evidence / boundary |
+| Area | State | What exists |
 |---|---|---|
-| Product architecture | Documented | Cloud-first, device-independent identity; devices are clients/optional workers, not the permanent brain. |
-| Memory trust model | Implemented in OpenJarvis source | User-authored evidence, pending-by-default candidates, explicit approval/rejection, quarantine handling, and CLI flows. |
-| Cloud API foundation | Source implemented | Worker routes for Access JWT validation, device proof, nonce replay protection, device revocation, encrypted memory, tasks, model routing, and voice proxy. |\n| Provider spend control | Source implemented; fail-closed defaults | Per-account monthly USD-micro budget, atomic D1 reservation/settlement triggers, per-provider input/output pricing, prompt-byte and output-token ceilings; chat and voice blocked unless explicit positive budget/pricing ceilings are configured. |
-| D1 schema | Six ordered migrations | Core account/device/memory/task/audit tables, device nonces, task capability requirements, per-account rate-limit counter, and monthly spend reservation ledger with atomic reservation/settlement guards. |
-| Memory sync | Hardened | Rowid keyset cursor; encrypted D1 BLOBs serialized as base64url on the API boundary. |
-| Model routing | Hardened | Explicit model selection does not silently fall back; `auto` and `allow_fallback` are handled; route metadata discloses provider/tier/fallback. |
-| Request limits | Source implemented | JSON body default 1 MB (configurable, hard-capped at 5 MB); voice body 15 MB; D1-backed account rate limit default 60 requests/minute (configurable up to 600). |
-| Task delegation | Source implemented | Idempotent encrypted task enqueue, expiring leases, and capability-aware claiming. |
-| Web client | Starter transport implemented | IndexedDB device identity with a non-exportable P-256 private key; enrolment, signed requests, memory sync, task enqueue/claim, and voice transport. |
-| Android client | Starter transport implemented | Android Keystore non-exportable P-256 identity, Access-token callback, signed requests, enrolment, and raw audio transport. |
-| Language evaluation | Starter assets implemented | 25 Hindi/Hinglish/English cases, runner, and scoring guidance. No model has been benchmarked or selected. |
-| API contract | Draft OpenAPI 3.1 | Device, memory, task, chat, and voice routes documented. It still needs automated lint/contract verification against the Worker. |
+| Architecture | Documented | One account identity across authorised devices; cloud-first coordination; devices are clients/optional workers, not the permanent brain. |
+| Memory trust model | Implemented in OpenJarvis | User-authored evidence, pending-by-default candidates, explicit approval/rejection, quarantine handling, and CLI flows. |
+| Access and device security | Implemented | Access JWT RS256 signature, issuer, audience and expiry validation; P-256 device proof; timestamp window; nonce replay protection; device enrolment, listing, heartbeat, presence and revocation. |
+| D1 schema | Eight ordered migrations | Account/device/memory/task/audit data; nonce records; task capabilities; API rate limits; monthly spend ledger; settlement guards; idempotency for memory/task writes; monthly input/output token budgets. |
+| Encrypted memory API | Implemented | Client-encrypted immutable revisions, pending-by-default writes, approval into a new revision, tombstones, base64url wire serialization and opaque rowid sync cursor. |
+| Offline replay safety | Implemented | Idempotency keys and request hashes for memory writes and task enqueue. Reusing a key with different content returns 409. |
+| Task delegation | Implemented | Capability-aware claims, expiring leases, concurrent-claim protection, and lease expiry recovery when another device claims. |
+| Device coordination | Implemented | Authenticated heartbeat and online/offline freshness indicator (90-second window); any authenticated request also refreshes last-seen time. |
+| Provider spend controls | Implemented, fail-closed | Per-account monthly USD-micro cap; per-provider input/output pricing; prompt byte and per-request output-token ceilings; monthly input/output token caps; atomic D1 reservations and settlement triggers. |
+| Voice spend controls | Implemented, fail-closed | Voice transcription/synthesis require a reviewed maximum per-request cost and share the monthly spend cap. |
+| Model routing | Implemented | Primary/backup routing, explicit model no-fallback behavior, auto, allow_fallback=false, and provider/tier/fallback metadata. |
+| Web client | Source implemented; TypeScript checked | Non-exportable P-256 key in IndexedDB; encrypted memory cache; durable ciphertext-only outbox; idempotent replay; manual flush; heartbeat; task and voice transport. |
+| Android client | Starter source implemented; not built on Android CI | Android Keystore P-256 identity; SQLite ciphertext-only cache/outbox; idempotent replay; heartbeat; signed requests and voice transport. |
+| API contract | Draft OpenAPI 3.1 | Device, memory, task, chat and voice routes; still needs automated contract linting. |
 
-## Not complete — engineering blockers
+## Verification evidence
 
-1. **Provider spend ceiling:** Fail-closed D1 reservations and settlement are implemented. Migration `0006_provider_spend_settlement_guard.sql` rejects settlement above the reserved maximum and makes reservation identity/amount immutable. The checked-in default monthly budget and all provider pricing/voice ceilings are zero, so inference remains blocked until a provider/model, verified current pricing, and owner-approved monthly budget are configured.
-2. **Worker CI:** NEO Cloudflare Worker run #36 passed on PR head `3c2c86001c9fe42f7eb3b39bc902b4d1d99c8fec`: `npm install`, `npm run check`, and `npm test` succeeded. Vitest reported 2 files and 31 tests passed (17 route/unit tests + 14 D1-backed integration tests).
-3. **D1-backed integration tests:** Added and passed coverage for Access JWT signature/issuer/audience/expiry, device proof, nonce replay, revocation, account isolation, rate limiting, concurrent memory revisions, task lease races/expiry, capability-aware claims, concurrent spend reservations, and settlement-above-reservation rejection. Broader production D1 load/failure tests remain outstanding.
-4. **Provider/voice integration tests:** D1-backed tests now pass for primary-to-backup failover, explicit-model no-fallback, monthly budget exhaustion, and transcription upload forwarding. Voice synthesis, provider timeout/partial-response accounting, malformed usage payloads, and real-provider compatibility still need coverage.
-5. **Browser client hardening:** Add CSP, dependency/XSS controls, secure Access-token lifecycle, browser persistence tests, and device recovery/re-enrolment behavior.
-6. **Offline continuity:** Encrypted local cache, durable encrypted outbox, conflict/retry/replay behavior, and an explicitly lower-tier local inference fallback are not implemented.
-7. **Device coordination:** Device presence/heartbeat, health checks, online compute availability, capability grant/revocation workflow, and resilient task recovery need implementation and tests.
-8. **Storage/coordination:** R2 encrypted attachments/exports/snapshots and Durable Object per-account coordination are not provisioned or implemented.
-9. **Native app integration:** The Android code is a transport primitive, not a complete application. It needs host-app integration, Access login, permissions, foreground microphone UX, secure local cache/outbox, and real-device testing. There is no shipped iOS/desktop client integration yet.
-10. **Language quality gate:** Run the same evaluation set across shortlisted providers/models, blind-score results, measure latency/cost, and approve a primary/backup pair. No quality threshold has been met or certified yet.
-11. **Security assurance:** Independent security review/penetration test, staging rollback rehearsal, data deletion/recovery tests, and production threat review remain outstanding.
+Latest NEO Worker run at the time of this report:
 
-## Owner actions required
+- Workflow run #53: **Success**
+- Tested commit: 0e2ba33f2da377d264fc7ae0aa13cd82e13123ce
+- npm install --ignore-scripts: passed; npm reported 0 vulnerabilities.
+- npm run check: passed.
+- npm test: passed.
+- Vitest: **2 test files, 39 tests passed**.
 
-1. Open the repository's **Actions** tab, select **NEO Cloudflare Worker**, choose branch `neo/foundation-architecture`, and click **Run workflow**. Wait for both `npm run check` and `npm test` to finish; do not merge if either fails.
-2. Review the draft PR and its security review. Keep it unmerged until latest CI and D1-backed tests pass.
-3. Decide which inference provider/model(s) may be used and the maximum monthly spend in INR/USD. No provider secret should be configured before this decision and a tested spend ceiling.
-4. Only after the security gates pass, approve a Cloudflare staging setup: Access application, D1 database, Worker, and later R2/ Durable Objects. Apply migrations in order in staging only.
-5. Integrate the Android client into a host app and test enrolment, same-account two-device sync, revocation, voice permissions, offline recovery, and task handoff on actual devices.
-6. Review and approve the model benchmark results before selecting a primary and backup.
+D1-backed integration coverage includes:
+- Valid/invalid Access JWT signature, issuer, audience and expiry.
+- Device signature, nonce replay, cross-account isolation, enrolment and revocation.
+- Device online/offline presence and heartbeat.
+- D1 rate limiting.
+- Concurrent memory revision allocation and memory idempotency.
+- Task idempotency, capability filtering, competing leases and expired-lease recovery.
+- Concurrent monthly spend reservations and settlement bounds.
+- Concurrent monthly output-token reservations and token settlement bounds.
+- Primary-to-backup failover, explicit-model no-fallback, allow_fallback=false, spend exhaustion and provider network failure.
+- Voice transcription and speech synthesis proxy behavior.
 
-## Deployment gate
+These tests run against Cloudflare's local Workers runtime and SQLite-backed D1 simulation. They are not a remote D1 staging test or a production penetration test.
 
-Do not put personal memory, real conversations, provider keys, or paid inference behind this Worker until the spend ceiling, D1-backed security tests, latest CI, staging validation, and rollback plan are complete. Production deployment requires a separate explicit approval.
+## Financial controls — important operating rule
+
+The non-test Wrangler defaults are deliberately set to zero for:
+- MAX_MONTHLY_SPEND_USD_MICROS
+- MAX_MONTHLY_INPUT_TOKENS
+- MAX_MONTHLY_OUTPUT_TOKENS
+- all primary/backup input/output model prices
+- voice transcription/synthesis maximum per-request costs
+
+Therefore **chat and voice inference remain blocked** until a provider/model is selected, current provider pricing is independently checked, and the owner explicitly sets a monthly USD spend cap, input-token cap, output-token cap, and voice per-request ceilings. No provider secrets have been added.
+
+Input-token reservation uses serialized request bytes as a conservative upper bound; output tokens are bounded by the server maximum. Every possible provider candidate is reserved before a request. Failed attempts are charged their full reservation; missing usage data is charged conservatively at the reservation. A settlement above the reservation is rejected and leaves the reservation held, intentionally blocking additional inference until an operator reconciles it. Automated reservation-reconciliation tooling is not yet implemented.
+
+## Remaining blockers
+
+1. **Staging and operational validation:** No Cloudflare account resources have been provisioned; remote D1 migration rehearsal, staging deployment, rollback, restore and deletion tests remain.
+2. **Real provider compatibility:** All provider/voice integration tests use mocks. Test real provider error formats, timeouts, malformed/missing usage, voice duration pricing and backup independence after credentials and budget are approved.
+3. **Budget operations:** Pricing is manually configured and can drift. Add a documented pricing review/update process, budget dashboard/alerts, reservation reconciliation and operator audit trail. Current caps are per account, not a global shared-provider-key ceiling.
+4. **Offline behavior:** Web/Android cache and outbox are source implemented, but browser IndexedDB and Android SQLite behavior have not been exercised on real devices. Outbox flush is caller-driven; no automatic background scheduler/backoff exists.
+5. **Local inference fallback:** Not implemented. Offline mode currently provides encrypted cached memory and queued writes/tasks, not an equivalent local AI model.
+6. **Browser security:** Add strict CSP, dependency/XSS controls, secure Access-token lifecycle, persistence/recovery tests and device re-enrolment flow.
+7. **Native app integration:** Android code is a transport/storage primitive, not a built application. No Gradle app/test project, Access login UI, microphone permission UX, background worker or real-device test exists. iOS and desktop integrations are absent.
+8. **Storage/coordination expansion:** R2 encrypted attachments/exports/snapshots and Durable Object coordination are not implemented or provisioned.
+9. **Independent security review:** Source-level checks are not a third-party penetration test or security certification.
+10. **Language quality gate:** Run the Hindi/Hinglish evaluation set across candidate models, blind-score outputs, and select no primary model until quality and cost gates pass.
+
+## Release decision
+
+Keep PR #1 as **Draft**. Do not merge or deploy yet. The Worker foundation now has meaningful local D1 security/concurrency coverage and fail-closed spend/token controls, but staging, real provider testing, Android device validation, browser hardening, recovery operations and independent security review remain release blockers.

@@ -12,6 +12,8 @@ export interface Env {
   MAX_BODY_BYTES?: string;
   MAX_REQUESTS_PER_MINUTE?: string;
   MAX_MONTHLY_SPEND_USD_MICROS?: string;
+  MAX_MONTHLY_INPUT_TOKENS?: string;
+  MAX_MONTHLY_OUTPUT_TOKENS?: string;
   MAX_PROMPT_BYTES?: string;
   MAX_OUTPUT_TOKENS?: string;
   MODEL_PRIMARY_INPUT_USD_MICROS_PER_1M?: string;
@@ -55,23 +57,30 @@ async function reserveProviderSpend(
   env: Env,
   amountMicros: number,
   providerLabel: string,
+  reservedInputTokens = 0,
+  reservedOutputTokens = 0,
 ): Promise<string | null> {
   const limit = positiveConfig(env.MAX_MONTHLY_SPEND_USD_MICROS);
+  const inputTokenLimit = positiveConfig(env.MAX_MONTHLY_INPUT_TOKENS);
+  const outputTokenLimit = positiveConfig(env.MAX_MONTHLY_OUTPUT_TOKENS);
   if (!limit || !Number.isSafeInteger(amountMicros) || amountMicros <= 0) return null;
+  if (!Number.isSafeInteger(reservedInputTokens) || reservedInputTokens < 0 ||
+      !Number.isSafeInteger(reservedOutputTokens) || reservedOutputTokens < 0) return null;
+  if ((reservedInputTokens > 0 && !inputTokenLimit) || (reservedOutputTokens > 0 && !outputTokenLimit)) return null;
   const month = spendMonth();
   const timestamp = now();
   await env.DB.prepare(
-    "INSERT INTO provider_spend_usage(account_id,month_key,budget_microusd,reserved_microusd,spent_microusd,updated_at) VALUES(?,?,?,0,0,?) ON CONFLICT(account_id,month_key) DO UPDATE SET budget_microusd=excluded.budget_microusd,updated_at=excluded.updated_at",
-  ).bind(account, month, limit, timestamp).run();
+    "INSERT INTO provider_spend_usage(account_id,month_key,budget_microusd,monthly_input_token_limit,monthly_output_token_limit,reserved_microusd,spent_microusd,reserved_input_tokens,reserved_output_tokens,input_tokens,output_tokens,updated_at) VALUES(?,?,?,?,?,0,0,0,0,0,0,?) ON CONFLICT(account_id,month_key) DO UPDATE SET budget_microusd=excluded.budget_microusd,monthly_input_token_limit=excluded.monthly_input_token_limit,monthly_output_token_limit=excluded.monthly_output_token_limit,updated_at=excluded.updated_at",
+  ).bind(account, month, limit, inputTokenLimit || 0, outputTokenLimit || 0, timestamp).run();
   const reservationId = id();
   try {
     await env.DB.prepare(
-      "INSERT INTO provider_spend_reservations(reservation_id,account_id,month_key,reserved_microusd,state,provider_label,created_at) VALUES(?,?,?,?,'reserved',?,?)",
-    ).bind(reservationId, account, month, amountMicros, providerLabel.slice(0, 160), timestamp).run();
+      "INSERT INTO provider_spend_reservations(reservation_id,account_id,month_key,reserved_microusd,reserved_input_tokens,reserved_output_tokens,state,provider_label,created_at) VALUES(?,?,?,?,?,?,'reserved',?,?)",
+    ).bind(reservationId, account, month, amountMicros, reservedInputTokens, reservedOutputTokens, providerLabel.slice(0, 160), timestamp).run();
     return reservationId;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (message.includes("spend_budget_exceeded")) return null;
+    if (message.includes("spend_budget_exceeded") || message.includes("token_budget_exceeded")) return null;
     throw error;
   }
 }
@@ -79,11 +88,15 @@ async function settleProviderSpend(
   env: Env,
   reservationId: string,
   spentMicros: number,
+  settledInputTokens = 0,
+  settledOutputTokens = 0,
 ): Promise<void> {
-  if (!Number.isSafeInteger(spentMicros) || spentMicros < 0) throw new Error("Invalid provider spend settlement");
+  if (!Number.isSafeInteger(spentMicros) || spentMicros < 0 ||
+      !Number.isSafeInteger(settledInputTokens) || settledInputTokens < 0 ||
+      !Number.isSafeInteger(settledOutputTokens) || settledOutputTokens < 0) throw new Error("Invalid provider spend settlement");
   const result = await env.DB.prepare(
-    "UPDATE provider_spend_reservations SET state='settled',settled_microusd=?,settled_at=? WHERE reservation_id=? AND state='reserved'",
-  ).bind(spentMicros, now(), reservationId).run();
+    "UPDATE provider_spend_reservations SET state='settled',settled_microusd=?,settled_input_tokens=?,settled_output_tokens=?,settled_at=? WHERE reservation_id=? AND state='reserved'",
+  ).bind(spentMicros, settledInputTokens, settledOutputTokens, now(), reservationId).run();
   if (!result.meta.changes) throw new Error("Provider spend reservation was already settled or missing");
 }
 async function enforceAccountRateLimit(account: string, env: Env): Promise<void> {
@@ -491,10 +504,12 @@ async function modelRoute(req:Request,env:Env,account:string):Promise<Response>{
     maximum:costMicros(promptBytes,requestedOutput,p.inputRate!,p.outputRate!),
   }));
   const totalReserve=reservations.reduce((sum,item)=>sum+item.maximum,0);
-  if(!Number.isSafeInteger(totalReserve)||totalReserve<=0)return fail(503,"spend_pricing_invalid","Provider spend reservation could not be calculated safely");
-  const reservationId=await reserveProviderSpend(account,env,totalReserve,candidates.map(p=>p.name).join(","));
-  if(!reservationId)return fail(429,"spend_budget_exceeded","Monthly provider spend budget is unset or exhausted; no provider request was sent");
-  let attemptedSpend=0;
+  const reservedInputTokens=promptBytes*reservations.length;
+  const reservedOutputTokens=requestedOutput*reservations.length;
+  if(!Number.isSafeInteger(totalReserve)||totalReserve<=0||!Number.isSafeInteger(reservedInputTokens)||!Number.isSafeInteger(reservedOutputTokens))return fail(503,"spend_pricing_invalid","Provider spend/token reservation could not be calculated safely");
+  const reservationId=await reserveProviderSpend(account,env,totalReserve,candidates.map(p=>p.name).join(","),reservedInputTokens,reservedOutputTokens);
+  if(!reservationId)return fail(429,"spend_budget_exceeded","Monthly spend or token budget is unset or exhausted; no provider request was sent");
+  let attemptedSpend=0,attemptedInputTokens=0,attemptedOutputTokens=0;
   let lastError="provider_unavailable";
   for(let i=0;i<reservations.length;i++){
     const {provider:p,maximum}=reservations[i];
@@ -510,9 +525,11 @@ async function modelRoute(req:Request,env:Env,account:string):Promise<Response>{
       const response=await fetch(p.url!.replace(/\/$/,"")+"/chat/completions",{method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+p.key!},body:JSON.stringify(forwarded),signal:AbortSignal.timeout(60_000)});
       if(!response.ok){
         attemptedSpend+=maximum;
+        attemptedInputTokens+=promptBytes;
+        attemptedOutputTokens+=requestedOutput;
         lastError="provider_http_"+response.status;
         if((response.status<500&&response.status!==429)||i===reservations.length-1){
-          try{await settleProviderSpend(env,reservationId,attemptedSpend);}catch{return fail(503,"spend_settlement_failed","Provider spend could not be reconciled; further inference is blocked");}
+          try{await settleProviderSpend(env,reservationId,attemptedSpend,attemptedInputTokens,attemptedOutputTokens);}catch{return fail(503,"spend_settlement_failed","Provider spend could not be reconciled; further inference is blocked");}
           return fail(502,"provider_error",lastError);
         }
         continue;
@@ -521,21 +538,26 @@ async function modelRoute(req:Request,env:Env,account:string):Promise<Response>{
       const usage=payload.usage as {prompt_tokens?:unknown;completion_tokens?:unknown}|undefined;
       const promptTokens=Number(usage?.prompt_tokens);
       const completionTokens=Number(usage?.completion_tokens);
-      const actualSpend=Number.isSafeInteger(promptTokens)&&promptTokens>=0&&Number.isSafeInteger(completionTokens)&&completionTokens>=0
-        ? costMicros(promptTokens,completionTokens,p.inputRate!,p.outputRate!)
+      const usageValid=Number.isSafeInteger(promptTokens)&&promptTokens>=0&&Number.isSafeInteger(completionTokens)&&completionTokens>=0;
+      const actualInputTokens=usageValid?promptTokens:promptBytes;
+      const actualOutputTokens=usageValid?completionTokens:requestedOutput;
+      const actualSpend=usageValid
+        ? costMicros(actualInputTokens,actualOutputTokens,p.inputRate!,p.outputRate!)
         : maximum;
-      try{await settleProviderSpend(env,reservationId,attemptedSpend+actualSpend);}catch{return fail(503,"spend_settlement_failed","Provider spend could not be reconciled; further inference is blocked");}
+      try{await settleProviderSpend(env,reservationId,attemptedSpend+actualSpend,attemptedInputTokens+actualInputTokens,attemptedOutputTokens+actualOutputTokens);}catch{return fail(503,"spend_settlement_failed","Provider spend/token usage could not be reconciled; further inference is blocked");}
       return json({ ...payload, neo:{provider:p.name,model:p.name,...modelRouteMetadata(p.name,primary.name,routing.automaticFallback,Boolean(primary.url&&primary.key),lastError,Date.now()-started)}});
     }catch(e){
       attemptedSpend+=maximum;
+      attemptedInputTokens+=promptBytes;
+      attemptedOutputTokens+=requestedOutput;
       lastError=e instanceof Error?e.name:"provider_network_error";
       if(routing.explicit||i===reservations.length-1){
-        try{await settleProviderSpend(env,reservationId,attemptedSpend);}catch{return fail(503,"spend_settlement_failed","Provider spend could not be reconciled; further inference is blocked");}
+        try{await settleProviderSpend(env,reservationId,attemptedSpend,attemptedInputTokens,attemptedOutputTokens);}catch{return fail(503,"spend_settlement_failed","Provider spend could not be reconciled; further inference is blocked");}
         return fail(502,"provider_error",lastError);
       }
     }
   }
-  try{await settleProviderSpend(env,reservationId,attemptedSpend);}catch{return fail(503,"spend_settlement_failed","Provider spend could not be reconciled; further inference is blocked");}
+  try{await settleProviderSpend(env,reservationId,attemptedSpend,attemptedInputTokens,attemptedOutputTokens);}catch{return fail(503,"spend_settlement_failed","Provider spend could not be reconciled; further inference is blocked");}
   return fail(502,"provider_error",lastError);
 }
 async function voiceRoute(req:Request,env:Env,mode:"transcribe"|"synthesize",account:string):Promise<Response>{

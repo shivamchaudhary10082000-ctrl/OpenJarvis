@@ -115,18 +115,34 @@ class NeoAndroidClient(
         }
     }
 
+    private fun sanitizeEncryptedPayload(jsonBody: String, allowedFields: Set<String>): String {
+        val payload = JSONObject(jsonBody)
+        val keys = payload.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            require(key in allowedFields) { "Offline-capable payload contains an unsupported field: $key" }
+        }
+        require(payload.has("payload_ciphertext") && payload.has("payload_nonce")) {
+            "Offline-capable payload must contain encrypted ciphertext and nonce"
+        }
+        return payload.toString()
+    }
+
     suspend fun createEncryptedMemory(jsonBody: String, idempotencyKey: String = UUID.randomUUID().toString().replace("-", "")): JSONObject {
+        val safeBody = sanitizeEncryptedPayload(
+            jsonBody, setOf("memory_id", "payload_ciphertext", "payload_nonce", "key_version", "source_kind")
+        )
         val headers = mapOf("Idempotency-Key" to idempotencyKey, "Content-Type" to "application/json")
         val response = try {
-            signedRequest("POST", "/memory", jsonBody.toByteArray(), "application/json", headers)
+            signedRequest("POST", "/memory", safeBody.toByteArray(), "application/json", headers)
         } catch (error: IOException) {
-            val id = withContext(Dispatchers.IO) { offlineStore.enqueue("memory.create", "/memory", idempotencyKey, jsonBody) }
+            val id = withContext(Dispatchers.IO) { offlineStore.enqueue("memory.create", "/memory", idempotencyKey, safeBody) }
             return JSONObject().put("status", "queued_offline").put("outbox_id", id).put("idempotency_key", idempotencyKey)
         }
         response.use {
             if (it.isSuccessful) return JSONObject(it.body?.string() ?: "{}")
             if (it.code == 408 || it.code == 425 || it.code == 429 || it.code >= 500) {
-                val id = withContext(Dispatchers.IO) { offlineStore.enqueue("memory.create", "/memory", idempotencyKey, jsonBody) }
+                val id = withContext(Dispatchers.IO) { offlineStore.enqueue("memory.create", "/memory", idempotencyKey, safeBody) }
                 return JSONObject().put("status", "queued_offline").put("outbox_id", id).put("idempotency_key", idempotencyKey)
             }
             throw IllegalStateException("Memory write failed: ${it.code}")
@@ -134,17 +150,20 @@ class NeoAndroidClient(
     }
 
     suspend fun queueEncryptedTask(jsonBody: String, idempotencyKey: String = UUID.randomUUID().toString().replace("-", "")): JSONObject {
+        val safeBody = sanitizeEncryptedPayload(
+            jsonBody, setOf("task_kind", "payload_ciphertext", "payload_nonce", "key_version", "required_capabilities")
+        )
         val headers = mapOf("Idempotency-Key" to idempotencyKey, "Content-Type" to "application/json")
         val response = try {
-            signedRequest("POST", "/tasks", jsonBody.toByteArray(), "application/json", headers)
+            signedRequest("POST", "/tasks", safeBody.toByteArray(), "application/json", headers)
         } catch (error: IOException) {
-            val id = withContext(Dispatchers.IO) { offlineStore.enqueue("task.enqueue", "/tasks", idempotencyKey, jsonBody) }
+            val id = withContext(Dispatchers.IO) { offlineStore.enqueue("task.enqueue", "/tasks", idempotencyKey, safeBody) }
             return JSONObject().put("status", "queued_offline").put("outbox_id", id).put("idempotency_key", idempotencyKey)
         }
         response.use {
             if (it.isSuccessful) return JSONObject(it.body?.string() ?: "{}")
             if (it.code == 408 || it.code == 425 || it.code == 429 || it.code >= 500) {
-                val id = withContext(Dispatchers.IO) { offlineStore.enqueue("task.enqueue", "/tasks", idempotencyKey, jsonBody) }
+                val id = withContext(Dispatchers.IO) { offlineStore.enqueue("task.enqueue", "/tasks", idempotencyKey, safeBody) }
                 return JSONObject().put("status", "queued_offline").put("outbox_id", id).put("idempotency_key", idempotencyKey)
             }
             throw IllegalStateException("Task enqueue failed: ${it.code}")

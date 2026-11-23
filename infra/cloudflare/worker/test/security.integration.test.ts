@@ -3,8 +3,9 @@ import { env } from "cloudflare:workers";
 import worker from "../src/index";
 
 const encoder = new TextEncoder();
-const issuer = env.ACCESS_TEAM_DOMAIN.replace(/\/$/, "");
-const audience = env.ACCESS_AUD;
+const bindings = env as unknown as { ACCESS_TEAM_DOMAIN: string; ACCESS_AUD: string; DB: D1Database };
+const issuer = bindings.ACCESS_TEAM_DOMAIN.replace(/\/$/, "");
+const audience = bindings.ACCESS_AUD;
 const baseUrl = "https://neo.integration.test";
 let accessKeys: CryptoKeyPair;
 let accessPublicJwk: JsonWebKey;
@@ -343,7 +344,7 @@ describe("D1-backed encrypted memory and task concurrency", () => {
     const payload = await claimed.json() as { task: { task_id: string } };
     expect(payload.task.task_id).toBeTruthy();
 
-    await env.DB.prepare("UPDATE task_leases SET lease_expires_at = 0 WHERE task_id = ?")
+    await bindings.DB.prepare("UPDATE task_leases SET lease_expires_at = 0 WHERE task_id = ?")
       .bind(payload.task.task_id).run();
 
     const recovered = await call(second, "/v1/tasks/claim", {

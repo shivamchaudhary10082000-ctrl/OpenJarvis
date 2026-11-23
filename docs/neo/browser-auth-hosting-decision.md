@@ -44,7 +44,7 @@ Official references:
 - [Cloudflare Access authorization cookie](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/)
 - [Cloudflare Access JWT validation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
 
-**Recommended browser direction:** protect the chosen app/API hostname with Cloudflare Access and have the Worker validate the Access-injected `Cf-Access-Jwt-Assertion` header. Keep bearer-token support for non-browser clients and controlled tests. This requires a small Worker auth-extraction change plus tests before it can be used; it is not implemented in this commit. The Worker must still verify signature, issuer, audience and expiry. Never trust unsigned email headers.
+**Recommended browser direction:** protect the chosen app/API hostname with Cloudflare Access and have the Worker validate the Access-injected `Cf-Access-Jwt-Assertion` header. The development branch now accepts this assertion and retains bearer-token support for native/controlled clients. Both inputs pass through the same RS256 signature, exact issuer, configured audience and expiry checks. If the assertion header is present but invalid, the Worker fails closed rather than falling back to a bearer token. A focused integration test covers assertion success and invalid-assertion precedence; its CI result is pending on the latest branch head. Never trust unsigned email headers.
 
 If the owner instead chooses a browser identity SDK that supplies a short-lived Access JWT to JavaScript, use the following contract:
 
@@ -85,7 +85,8 @@ The existing Tauri CSP is not a template for the browser host: it currently allo
 
 - Worker CI on the inspected PR head passed TypeScript, OpenAPI lint, Wrangler dry-run, 50 Vitest tests and the native Playwright IndexedDB suite: 9/9 across Chromium, Firefox and WebKit.
 - The Playwright suite validates browser CryptoKey persistence, encrypted cache recovery and ciphertext outbox replay. It does not validate a real Access login, production CSP headers, CORS, account recovery or real host origins.
-- A focused Vitest regression is added alongside this decision record to assert the host token callback is invoked for every request and returned tokens are absent from IndexedDB. Its result must be taken from CI on the commit containing this change.
+- A focused Vitest regression asserts the host token callback is invoked for every request and returned tokens are absent from IndexedDB; that earlier test passed in the 51/51 Worker run on `dc45f8a...`.
+- A new Worker integration test verifies that the Access-injected assertion is accepted using the same JWT verifier and that an invalid assertion cannot fall back to a valid bearer token. Its result is pending CI on the implementation commit.
 - No live-host CSP/authentication test or independent penetration test has been performed.
 
 ## 7. Owner decisions and morning gates

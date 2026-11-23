@@ -80,3 +80,12 @@ Expired device nonces are removed by a 15-minute scheduled Worker task. Settled 
 - Do not provision paid inference or deploy to production.
 - Keep PR #1 Draft.
 - Complete staging migration/rollback/restore tests, real provider cost verification, Android/browser validation and an independent penetration test before release.
+
+
+## 2026-11-24 follow-up
+
+The desktop lockfile has been updated from `cookie 0.18.1` to patched `0.18.3` using the registry-published checksum. This removes the known vulnerable version from the lockfile as authored, but the finding remains **pending verification** until the Rust advisory workflow and desktop build complete successfully on the updated PR head.
+
+A Gradle Android test harness and Playwright browser-native IndexedDB matrix have been added. Their CI runs are pending; do not describe them as passing until workflow evidence is reviewed. Emulator validation is not a physical-device matrix.
+
+Remote Cloudflare staging/rollback/restore and independent penetration testing remain unperformed. No Cloudflare account resources or production systems were changed.

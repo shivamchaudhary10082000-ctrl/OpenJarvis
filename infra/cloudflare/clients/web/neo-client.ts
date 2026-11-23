@@ -136,8 +136,8 @@ export async function createDeviceIdentity():Promise<StoredIdentity>{
 }
 
 export class NeoDeviceClient {
-  private constructor(private baseUrl:string,private accessToken:()=>Promise<string>,private identity:StoredIdentity,private scopeKey:string){}
-  static async create(baseUrl:string,accessToken:()=>Promise<string>,accountScope:string){
+  private constructor(private baseUrl:string,private accessToken:(()=>Promise<string>)|undefined,private identity:StoredIdentity,private scopeKey:string){}
+  static async create(baseUrl:string,accessToken:(()=>Promise<string>)|undefined,accountScope:string){
     if(!accountScope.trim())throw new Error("A stable account scope is required for local device storage");
     const scopeKey=toB64u(await sha256(enc.encode(accountScope)));
     let identity=await loadIdentity(scopeKey);
@@ -150,7 +150,9 @@ export class NeoDeviceClient {
   }
   get deviceId(){return this.identity.deviceId;}
   async enrol(label:string,platform:DevicePlatform,capabilities:string[]=[]){
-    const response=await fetch(this.baseUrl+"/v1/devices",{method:"POST",headers:{"authorization":"Bearer "+await this.accessToken(),"content-type":"application/json","x-neo-device-id":this.deviceId},body:JSON.stringify({label,platform,public_key_jwk:this.identity.publicJwk,capabilities})});
+    const headers=new Headers({"content-type":"application/json","x-neo-device-id":this.deviceId});
+    if(this.accessToken)headers.set("authorization","Bearer "+await this.accessToken());
+    const response=await fetch(this.baseUrl+"/v1/devices",{method:"POST",headers,body:JSON.stringify({label,platform,public_key_jwk:this.identity.publicJwk,capabilities})});
     if(!response.ok) throw new Error("NEO device enrolment failed: "+response.status);
     return response.json();
   }
@@ -163,7 +165,7 @@ export class NeoDeviceClient {
     const canonical=[method,url.host,url.pathname+url.search,ts,nonce,hash].join("\n");
     const signature=new Uint8Array(await crypto.subtle.sign({name:"ECDSA",hash:"SHA-256"},this.identity.privateKey,enc.encode(canonical)));
     const headers=new Headers(init.headers);
-    headers.set("authorization","Bearer "+await this.accessToken());
+    if(this.accessToken)headers.set("authorization","Bearer "+await this.accessToken());
     headers.set("x-neo-device-id",this.deviceId); headers.set("x-neo-timestamp",String(ts));
     headers.set("x-neo-nonce",nonce); headers.set("x-neo-signature",toB64u(signature));
     if(body.byteLength && !headers.has("content-type")) headers.set("content-type","application/json");

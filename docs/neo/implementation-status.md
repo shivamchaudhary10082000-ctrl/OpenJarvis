@@ -22,34 +22,30 @@ This report separates source implementation from tested behavior and from produc
 | Provider spend controls | Implemented, fail-closed | Per-account monthly USD-micro cap; per-provider input/output pricing; prompt byte and per-request output-token ceilings; monthly input/output token caps; atomic D1 reservations and settlement triggers. |
 | Voice spend controls | Implemented, fail-closed | Voice transcription/synthesis require a reviewed maximum per-request cost and share the monthly spend cap. |
 | Model routing | Implemented | Primary/backup routing, explicit model no-fallback behavior, auto, allow_fallback=false, and provider/tier/fallback metadata. |
-| Web client | Source implemented; TypeScript checked | Per-account non-exportable P-256 key in IndexedDB; account-scoped encrypted memory cache with tombstone-aware recall; durable ciphertext-only outbox; idempotent replay; manual flush; heartbeat; task and voice transport. |
-| Android client | Starter source implemented; not built on Android CI | Per-account Android Keystore P-256 identity; account-scoped SQLite ciphertext-only cache/outbox; idempotent replay; heartbeat; signed requests and voice transport. |
+| Web client | Source implemented; Worker CI tested with fake IndexedDB | Per-account non-exportable P-256 key in IndexedDB; account-scoped encrypted memory cache; durable ciphertext-only outbox; idempotent replay; manual flush; heartbeat; task and voice transport. Automated persistence/reconstruction/replay tests pass using fake IndexedDB; native browser matrix remains outstanding. |
+| Android client | Starter source implemented; not built on Android CI | Per-account Android Keystore P-256 identity; account-scoped SQLite ciphertext-only cache/outbox; idempotent replay; heartbeat; signed requests and voice transport. Fixed outbox success counter; no Gradle harness or physical-device run exists. |
 | API contract | Draft OpenAPI 3.1 | Device, memory, task, chat and voice routes; Redocly lint passes in CI. |
 
 ## Verification evidence
 
-Latest NEO Worker run at the time of this report:
+Latest NEO Worker run:
+- Workflow run #105: **Success**
+- Tested commit: `e85546f46b69f524c35acce84ce22ee58fae54a2`
+- npm install: passed.
+- Redocly OpenAPI lint: passed.
+- TypeScript check: passed.
+- Wrangler deploy dry-run: passed.
+- Vitest: **3 test files, 48 tests passed** (17 unit/route tests, 28 D1-backed integration tests, 3 browser-storage tests).
 
-- Workflow run #93: **Success**
-- Tested commit: 5ddb9f6f81b88475030cdefab32f9291247f8b61
-- npm install --ignore-scripts: passed; npm reported 0 vulnerabilities.
-- npm run check: passed.
-- npm test: passed.
-- Vitest: **2 test files, 43 tests passed**.\n- Redocly OpenAPI 3.1 lint: passed with no warnings.\n- Wrangler deployment dry-run using the test config: passed; Worker bundle 43.34 KiB (10.42 KiB gzip).
+New coverage:
+- Browser IndexedDB identity reconstruction, account-scope isolation, encrypted cache recovery after simulated offline restart, and durable ciphertext outbox replay.
+- Heartbeat expiry after the 90-second freshness window and recovery to online after a new heartbeat.
+- Voice upstream timeout accounting: maximum request reservation settled once; no blind retry of a billable audio upload.
+- Android outbox replay success counter corrected.
 
-D1-backed integration coverage includes:
-- Valid/invalid Access JWT signature, issuer, audience and expiry.
-- Device signature, nonce replay, cross-account isolation, enrolment and revocation.
-- Device online/offline presence, heartbeat and scheduled expired-nonce cleanup. Local client storage is isolated by a hashed stable account scope.
-- D1 rate limiting.
-- Concurrent memory revision allocation and memory idempotency.
-- Task idempotency, capability filtering, competing leases and expired-lease recovery.
-- Concurrent monthly spend reservations and settlement bounds.
-- Concurrent monthly output-token reservations and token settlement bounds.
-- Primary-to-backup failover, explicit-model no-fallback, allow_fallback=false, spend exhaustion and provider network failure.
-- Voice transcription and speech synthesis proxy behavior.
+Important qualification: browser persistence tests use fake IndexedDB with a test-only CryptoKey structured-clone adapter because Node's WebCrypto CryptoKey is not cloneable in that test runtime. This is not a real Chrome/Firefox/Safari test. Android code has not been compiled or exercised on physical devices.
 
-These tests run against Cloudflare's local Workers runtime and SQLite-backed D1 simulation. They are not a remote D1 staging test or a production penetration test.
+These tests run against Cloudflare's local Workers runtime and SQLite-backed D1 simulation. They are not remote D1 staging tests or a production penetration test.
 
 ## Financial controls — important operating rule
 
@@ -66,12 +62,12 @@ Input-token reservation uses serialized request bytes as a conservative upper bo
 
 ## Remaining blockers
 
-1. **Staging and operational validation:** No Cloudflare account resources have been provisioned; remote D1 migration rehearsal, staging deployment, rollback, restore and deletion tests remain.
+1. **Staging and operational validation:** A fail-closed disposable Wrangler template and staging/rollback/restore runbook are prepared. No Cloudflare resources have been provisioned; remote D1 migration rehearsal, staging deployment, rollback, restore and deletion tests remain.
 2. **Real provider compatibility:** All provider/voice integration tests use mocks. Test real provider error formats, timeouts, malformed/missing usage, voice duration pricing and backup independence after credentials and budget are approved.
 3. **Budget operations:** Pricing is manually configured and can drift. Add a documented pricing review/update process, budget dashboard/alerts, reservation reconciliation and operator audit trail. Current caps are per account, not a global shared-provider-key ceiling.
-4. **Offline behavior:** Web/Android cache and outbox are source implemented, but browser IndexedDB and Android SQLite behavior have not been exercised on real devices. Account-scoped namespaces and tombstone-aware reads are source implemented; native persistence still needs runtime tests. Server-side revocation cannot remotely wipe a disconnected device or revoke its local memory-decryption key. Outbox flush is caller-driven; no automatic background scheduler/backoff exists.
+4. **Offline behavior:** Web IndexedDB persistence/reconstruction/outbox tests pass under fake IndexedDB; native browser testing remains. Android SQLite remains uncompiled and untested on physical devices; a manual two-device/offline/reboot/replay test plan is documented. Server-side revocation cannot remotely wipe a disconnected device or revoke its local memory-decryption key. Outbox flush is caller-driven; no automatic background scheduler/backoff exists.
 5. **Local inference fallback:** Not implemented. Offline mode currently provides encrypted cached memory and queued writes/tasks, not an equivalent local AI model.
-6. **Browser security:** Add strict CSP, dependency/XSS controls, secure Access-token lifecycle, persistence/recovery tests and device re-enrolment flow.
+6. **Browser security:** Hosting CSP is not deployed. A report-only-to-enforce CSP, Trusted Types, XSS, dependency, token lifecycle and recovery review plan is documented; actual frontend origin/headers and token callback must be inspected before enforcement.
 7. **Native app integration:** Android code is a transport/storage primitive, not a built application. No Gradle app/test project, Access login UI, microphone permission UX, background worker or real-device test exists. iOS and desktop integrations are absent.
 8. **Storage/coordination expansion:** R2 encrypted attachments/exports/snapshots and Durable Object coordination are not implemented or provisioned.
 9. **Independent security review:** Source-level checks are not a third-party penetration test or security certification.

@@ -200,6 +200,10 @@ export class NeoDeviceClient {
     }
     return {sent,remaining:(await readOutbox()).length,blocked_on:blockedOn};
   }
+  async heartbeat(){
+    const r=await this.request("/devices/heartbeat",{method:"POST",body:"{}"});
+    if(!r.ok)throw new Error("Device heartbeat failed: "+r.status); return r.json();
+  }
   async claimTask(leaseSeconds=90){
     const r=await this.request("/tasks/claim",{method:"POST",body:JSON.stringify({lease_seconds:leaseSeconds})});
     if(!r.ok)throw new Error("Task claim failed: "+r.status); return r.json();

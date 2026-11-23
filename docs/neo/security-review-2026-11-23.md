@@ -99,3 +99,18 @@ Remote Cloudflare staging/rollback/restore and independent penetration testing r
 - Voice tests currently cover primary/backup failover accounting, no-fallback behavior, provider connection failure, transcription timeout without retry, successful transcription, and successful synthesis. They are mocked and do not prove live provider billing.
 - A conservative stale-reservation reconciler has now been added to the Worker scheduled handler. Reservations older than 30 minutes are settled at their full reserved USD and token ceilings rather than released, because a provider may have billed a request even if the Worker died before receiving the response. A regression test verifies trigger-based ledger reconciliation, preservation of fresh reservations and idempotent repeated runs. This new code/test is **pending CI** and is not yet counted as verified.
 - Phase 1 remains open until the new reconciliation test passes, Android emulator instrumentation and physical-device recovery are validated, and the real frontend hosting/token/CSP boundary is verified. Remote staging is intentionally blocked until those gates close.
+
+
+## 2026-11-24 CI follow-up — reconciliation assertion corrected
+
+The first Worker CI run for the new reconciliation code reached the test suite but failed one assertion: the helper correctly reconciled more than one stale reservation because the D1 test database is shared across the integration suite. The test incorrectly assumed exactly one stale reservation existed globally. The assertion now verifies at least one stale reservation is reconciled, then verifies the second pass reconciles zero and separately checks the test reservation's exact settled amounts and the fresh reservation's held state.
+
+The corrected test is on PR head `816b1f0ee99b81627cef0836ff047efdcd39ccb3`. Worker CI run #? and Android harness run #? were queued when this note was authored; no pass is claimed until they finish.
+
+The Android API-36 emulator harness had an earlier run where unit tests passed but emulator boot/instrumentation remained in progress. A subsequent harness run is queued. Do not count Android recovery as verified until `connectedDebugAndroidTest` succeeds.
+
+**Browser-hosting gate remains blocked by a missing deployment boundary:** the NEO browser code is a transport/storage library and is not integrated into the existing Tauri frontend. The repository contains no NEO browser-host deployment origin or server response-header configuration. Therefore a CSP header cannot be responsibly enforced yet; choosing a policy without knowing the actual script, API, auth, websocket, telemetry and asset origins risks either breaking the app or leaving broad unsafe allowances. The current Tauri CSP is not evidence of a secure browser-host CSP.
+
+**Token lifecycle gate:** the browser client accepts a caller-supplied access-token callback and does not itself persist tokens. There is no integrated login/refresh/sign-out/recovery provider flow to audit end-to-end. Keep the eventual provider token in memory only, refresh through the identity provider, clear it on sign-out, and revoke the device on account recovery; validate the actual integration before Phase 1 closure.
+
+Phase 1 remains open. No Cloudflare resources were provisioned and no application build was started.

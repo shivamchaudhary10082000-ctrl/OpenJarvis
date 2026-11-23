@@ -176,12 +176,16 @@ async function route(req: Request, env: Env): Promise<Response> {
           typeof x.public_key_jwk.x !== "string" || typeof x.public_key_jwk.y !== "string" ||
           !isValidCapabilityList(x.capabilities)) return fail(400, "invalid_device", "Invalid device registration");
       await env.DB.prepare("INSERT OR IGNORE INTO accounts(account_id, created_at, status) VALUES(?, ?, 'active')").bind(claims.sub, now()).run();
+      await enforceAccountRateLimit(claims.sub, env);
       await env.DB.prepare("INSERT INTO devices(device_id, account_id, label, platform, public_key_jwk, capabilities_json, created_at) VALUES(?,?,?,?,?,?,?)")
         .bind(deviceId, claims.sub, x.label, x.platform, JSON.stringify(x.public_key_jwk), JSON.stringify(x.capabilities.slice(0,32)), now()).run();
       await env.DB.prepare("INSERT INTO audit_events(event_id,account_id,device_id,event_type,created_at) VALUES(?,?,?,?,?)")
         .bind(id(), claims.sub, deviceId, "device.enrolled", now()).run();
       return json({ device_id: deviceId, account_id: claims.sub, status: "enrolled" }, 201);
-    } catch (e) { return fail(401, "enrolment_failed", e instanceof Error ? e.message : "Device enrolment failed"); }
+    } catch (e) {
+      if (e instanceof RateLimitExceeded) return fail(429, "rate_limited", "Account request rate limit exceeded; retry after the current minute");
+      return fail(401, "enrolment_failed", e instanceof Error ? e.message : "Device enrolment failed");
+    }
   }
   let auth: { account: string; device: Device };
   try { auth = await authenticate(req, env); } catch (e) {

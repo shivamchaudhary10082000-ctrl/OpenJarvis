@@ -56,6 +56,13 @@ class NeoOfflineStore(context: Context) : SQLiteOpenHelper(context, "neo-offline
         require(path == "/memory" || path == "/tasks")
         require(idempotencyKey.matches(Regex("[A-Za-z0-9_-]{16,128}")))
         val payload = JSONObject(body)
+        val allowed = if (kind == "memory.create") {
+            setOf("memory_id", "payload_ciphertext", "payload_nonce", "key_version", "source_kind")
+        } else {
+            setOf("task_kind", "payload_ciphertext", "payload_nonce", "key_version", "required_capabilities")
+        }
+        val keys = payload.keys()
+        while (keys.hasNext()) require(keys.next() in allowed) { "Offline queue accepts encrypted fields only" }
         require(payload.has("payload_ciphertext") && payload.has("payload_nonce")) {
             "Offline queue accepts encrypted payloads only"
         }

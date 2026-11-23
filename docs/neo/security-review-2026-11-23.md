@@ -89,3 +89,13 @@ The desktop lockfile has been updated from `cookie 0.18.1` to patched `0.18.3` u
 A Gradle Android test harness and Playwright browser-native IndexedDB matrix have been added. Their CI runs are pending; do not describe them as passing until workflow evidence is reviewed. Emulator validation is not a physical-device matrix.
 
 Remote Cloudflare staging/rollback/restore and independent penetration testing remain unperformed. No Cloudflare account resources or production systems were changed.
+
+
+## 2026-11-24 verification update
+
+- The suspended-account first-enrolment regression test and account-status guard are present on the active PR branch. Worker CI passed on commit `507eea87d1d15071bd92c3c1a5c68b959770f77d`, including TypeScript, OpenAPI lint, Wrangler dry-run, Vitest and the native Playwright browser suite (Chromium, Firefox and WebKit). This verifies the source/test branch in CI; it is not a live-host CSP or authentication test.
+- The Android harness unit-test job passed on that same commit. The emulator instrumentation job was still running at the time of this update. Physical Android hardware testing remains required.
+- Browser source review confirms the NEO transport accepts an Access-token callback and does not intentionally persist the token in IndexedDB. Non-exportable CryptoKeys do not mitigate same-origin XSS. No production-host CSP headers or actual NEO sign-in callback have been validated. The existing desktop Tauri CSP also contains broad `connect-src http: https: ws: wss:` and `script-src 'unsafe-inline'`; this is not an acceptable template for the NEO browser origin and needs a separate desktop CSP compatibility review before tightening.
+- Voice tests currently cover primary/backup failover accounting, no-fallback behavior, provider connection failure, transcription timeout without retry, successful transcription, and successful synthesis. They are mocked and do not prove live provider billing.
+- A conservative stale-reservation reconciler has now been added to the Worker scheduled handler. Reservations older than 30 minutes are settled at their full reserved USD and token ceilings rather than released, because a provider may have billed a request even if the Worker died before receiving the response. A regression test verifies trigger-based ledger reconciliation, preservation of fresh reservations and idempotent repeated runs. This new code/test is **pending CI** and is not yet counted as verified.
+- Phase 1 remains open until the new reconciliation test passes, Android emulator instrumentation and physical-device recovery are validated, and the real frontend hosting/token/CSP boundary is verified. Remote staging is intentionally blocked until those gates close.

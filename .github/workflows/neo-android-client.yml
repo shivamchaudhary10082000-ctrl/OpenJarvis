@@ -12,6 +12,7 @@ permissions:
 jobs:
   android-unit:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: infra/cloudflare/clients/android-test-harness
@@ -31,6 +32,7 @@ jobs:
       - run: gradle testDebugUnitTest
   android-instrumented:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: infra/cloudflare/clients/android-test-harness

@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - "infra/cloudflare/**"
+      - ".github/workflows/neo-cloudflare-worker.yml"
   push:
     branches: [main]
     paths:
       - "infra/cloudflare/**"
+      - ".github/workflows/neo-cloudflare-worker.yml"
 permissions:
   contents: read
 jobs:

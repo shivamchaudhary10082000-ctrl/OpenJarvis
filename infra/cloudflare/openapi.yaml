@@ -84,8 +84,6 @@ paths:
   /devices/heartbeat:
     post:
       summary: Refresh the authenticated device's online presence
-      parameters:
-        - $ref: "#/components/parameters/DeviceId"
       responses:
         "200":
           description: Device heartbeat accepted
@@ -154,6 +152,14 @@ paths:
       summary: Create a pending memory candidate
       parameters:
         - $ref: "#/components/parameters/DeviceId"
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Stable key for safe retry after a network failure; reusing it with different content returns 409.
+          schema:
+            type: string
+            minLength: 16
+            maxLength: 128
       requestBody:
         required: true
         content:
@@ -531,6 +537,8 @@ components:
           type: string
         status:
           enum: [active, revoked]
+        presence:
+          enum: [online, offline, revoked]
         capabilities:
           type: array
           items:

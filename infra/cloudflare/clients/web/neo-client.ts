@@ -89,8 +89,10 @@ export function selectRecallableMemory(records:Record<string,unknown>[],includeP
   for(const group of groups.values()){
     const durable=group.filter(record=>record.trust_state==="approved"||record.trust_state==="deleted")
       .sort((a,b)=>Number(b.revision)-Number(a.revision));
-    if(durable[0]?.trust_state==="approved")selected.push(durable[0]);
-    if(includePending)selected.push(...group.filter(record=>record.trust_state==="pending"));
+    const latestDurable=durable[0];
+    if(latestDurable?.trust_state==="approved")selected.push(latestDurable);
+    if(includePending)selected.push(...group.filter(record=>record.trust_state==="pending"&&
+      (!latestDurable||Number(record.revision)>Number(latestDurable.revision))));
   }
   return selected.sort((a,b)=>Number(a.updated_at||0)-Number(b.updated_at||0));
 }

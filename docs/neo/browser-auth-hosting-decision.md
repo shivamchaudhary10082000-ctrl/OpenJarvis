@@ -7,7 +7,7 @@
 
 - The NEO API is a Cloudflare Worker. Its current verifier accepts a bearer JWT, validates RS256 signature against the configured Cloudflare Access JWKS, checks the exact issuer, configured audience and expiry, and uses the verified `sub` as the account key.
 - First device enrolment requires an Access bearer token. Subsequent device operations require both the account token and a P-256 signed device proof with a five-minute timestamp window and one-use nonce.
-- The browser transport is a library, not a NEO application. `NeoDeviceClient.create(baseUrl, accessToken, accountScope)` accepts a host-supplied token callback. Enrolment and every signed request call that callback again. The client does not intentionally store the returned token in IndexedDB.
+- The browser transport is a library, not a NEO application. `NeoDeviceClient.create(baseUrl, accessToken, accountScope)` accepts an optional host-supplied token callback. Enrolment and each signed request call it when supplied; cookie-backed Cloudflare Access sessions can omit it and rely on the browser's same-origin HttpOnly session cookie plus the Worker-injected assertion. The client does not intentionally store access tokens in IndexedDB.
 - IndexedDB stores a per-account device ID, a non-exportable P-256 private `CryptoKey`, the public JWK, encrypted memory cache records, ciphertext outbox entries and sync metadata. The account scope is hashed before it is used as a local namespace.
 - The current OpenJarvis React app is built by Vite into `src/openjarvis/server/static`; FastAPI serves that SPA and its assets from the same origin. Vite development proxies API paths to the local FastAPI server. The Tauri desktop app is a separate local-webview deployment with its own CSP.
 - The repository does not contain a NEO browser UI, a NEO browser hostname, a Worker custom-domain/route binding, a Cloudflare Pages project, a production response-header configuration, a CORS allowlist, or a configured browser identity-provider SDK. The Wrangler Access issuer, audience and D1 ID are placeholders.
@@ -86,7 +86,7 @@ The existing Tauri CSP is not a template for the browser host: it currently allo
 - Worker CI on the inspected PR head passed TypeScript, OpenAPI lint, Wrangler dry-run, 50 Vitest tests and the native Playwright IndexedDB suite: 9/9 across Chromium, Firefox and WebKit.
 - The Playwright suite validates browser CryptoKey persistence, encrypted cache recovery and ciphertext outbox replay. It does not validate a real Access login, production CSP headers, CORS, account recovery or real host origins.
 - A focused Vitest regression asserts the host token callback is invoked for every request and returned tokens are absent from IndexedDB; that earlier test passed in the 51/51 Worker run on `dc45f8a...`.
-- A new Worker integration test verifies that the Access-injected assertion is accepted using the same JWT verifier and that an invalid assertion cannot fall back to a valid bearer token. Its result is pending CI on the implementation commit.
+- Worker integration verifies that the Access-injected assertion is accepted using the same JWT verifier and that an invalid assertion cannot fall back to a valid bearer token; browser client unit coverage verifies cookie-mode requests omit JavaScript bearer credentials. Results are pending CI on the latest implementation head.
 - No live-host CSP/authentication test or independent penetration test has been performed.
 
 ## 7. Owner decisions and morning gates

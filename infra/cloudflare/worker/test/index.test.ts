@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import worker, { decodeMemoryCursor, encodeMemoryCursor, modelRouteMetadata, readRequestBodyBounded, isValidCapabilityList, resolveModelRouting } from "../src/index";
+import worker, { decodeMemoryCursor, encodeMemoryCursor, modelRouteMetadata, readRequestBodyBounded, isValidCapabilityList, resolveModelRouting, encodeBytesBase64Url } from "../src/index";
 const env = {} as any;
 describe("NEO Worker unauthenticated surface", () => {
   it("exposes a minimal health response without authentication", async () => {
@@ -119,5 +119,13 @@ describe("model routing policy", () => {
     expect(resolveModelRouting(undefined, false)).toEqual({
       explicit: false, requestedModel: null, automaticFallback: false,
     });
+  });
+});
+
+
+describe("encrypted memory wire encoding", () => {
+  it("serializes D1 binary payloads as unpadded base64url", () => {
+    expect(encodeBytesBase64Url(new Uint8Array([255, 254, 253]))).toBe("__79");
+    expect(encodeBytesBase64Url(new Uint8Array([0, 1, 2]))).not.toMatch(/[+/=]/);
   });
 });

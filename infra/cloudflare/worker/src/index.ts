@@ -482,11 +482,14 @@ type Provider = {
 async function modelRoute(req:Request,env:Env,account:string):Promise<Response>{
   const x=await bodyJson<any>(req,env);
   if (!Array.isArray(x.messages) || x.messages.length<1 || x.messages.length>100) return fail(400,"invalid_messages","messages must contain 1–100 entries");
+  if (x.model !== undefined && typeof x.model !== "string") return fail(400,"invalid_model","model must be a string");
+  if (x.allow_fallback !== undefined && typeof x.allow_fallback !== "boolean") return fail(400,"invalid_fallback_policy","allow_fallback must be a boolean");
   const routing=resolveModelRouting(x.model,x.allow_fallback);
   const primary:Provider={url:env.MODEL_PRIMARY_URL,name:env.MODEL_PRIMARY_NAME||"primary",key:env.MODEL_PRIMARY_API_KEY,inputRate:positiveConfig(env.MODEL_PRIMARY_INPUT_USD_MICROS_PER_1M),outputRate:positiveConfig(env.MODEL_PRIMARY_OUTPUT_USD_MICROS_PER_1M)};
   const backup:Provider={url:env.MODEL_BACKUP_URL,name:env.MODEL_BACKUP_NAME||"backup",key:env.MODEL_BACKUP_API_KEY,inputRate:positiveConfig(env.MODEL_BACKUP_INPUT_USD_MICROS_PER_1M),outputRate:positiveConfig(env.MODEL_BACKUP_OUTPUT_USD_MICROS_PER_1M)};
   const choices=[primary,backup].filter(p=>p.url&&p.key);
   if (!choices.length) return fail(503,"model_unconfigured","No model provider is configured");
+  if (new Set(choices.map(provider=>provider.name)).size !== choices.length) return fail(503,"model_configuration_invalid","Configured provider names must be unique");
   if (routing.explicit && !choices.some(p=>p.name===routing.requestedModel)) return fail(400,"model_unavailable","Explicitly requested model is not configured; no fallback was attempted");
   const candidates=routing.explicit
     ? choices.filter(p=>p.name===routing.requestedModel)
@@ -516,6 +519,7 @@ async function modelRoute(req:Request,env:Env,account:string):Promise<Response>{
     try{
       const started=Date.now();
       const forwarded:Record<string,unknown>={...x,model:p.name,stream:false};
+      delete forwarded.allow_fallback;
       if(Object.prototype.hasOwnProperty.call(x,"max_completion_tokens")){
         forwarded.max_completion_tokens=requestedOutput;
         delete forwarded.max_tokens;

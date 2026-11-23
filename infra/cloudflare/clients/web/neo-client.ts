@@ -63,7 +63,7 @@ async function removeOutbox(id:string):Promise<void>{
   const db=await openDb();
   try{const tx=db.transaction("outbox","readwrite");tx.objectStore("outbox").delete(id);await transactionDone(tx);}finally{db.close();}
 }
-async function cacheMemory(records:Record<string,unknown>[]):Promise<void>{
+async function cacheMemory(records:Record<string,unknown>[],namespace:string):Promise<void>{
   if(!records.length)return;
   const db=await openDb();
   try{
@@ -71,7 +71,7 @@ async function cacheMemory(records:Record<string,unknown>[]):Promise<void>{
     for(const record of records){
       if(typeof record.memory_id!=="string"||typeof record.revision!=="number")continue;
       // Cache only the encrypted wire record; never decrypt or persist plaintext here.
-      store.put({key:record.memory_id+":"+record.revision,record} satisfies CachedMemory);
+      store.put({key:namespace+":"+record.memory_id+":"+record.revision,record} satisfies CachedMemory);
     }
     await transactionDone(tx);
   }finally{db.close();}
@@ -83,18 +83,18 @@ async function readCachedMemory(includePending=false):Promise<Record<string,unkn
       const r=db.transaction("memory_cache","readonly").objectStore("memory_cache").getAll();
       r.onsuccess=()=>resolve(r.result as CachedMemory[]);r.onerror=()=>reject(r.error);
     });
-    return rows.map(row=>row.record).filter(record=>includePending||record.trust_state==="approved"||record.trust_state==="deleted")
+    return rows.filter(row=>row.key.startsWith(namespace+":")).map(row=>row.record).filter(record=>includePending||record.trust_state==="approved"||record.trust_state==="deleted")
       .sort((a,b)=>Number(a.updated_at||0)-Number(b.updated_at||0));
   }finally{db.close();}
 }
-async function saveCursor(cursor:string|null):Promise<void>{
+async function saveCursor(cursor:string|null,namespace:string):Promise<void>{
   const db=await openDb();
-  try{const tx=db.transaction("meta","readwrite");tx.objectStore("meta").put(cursor,"memory_cursor");await transactionDone(tx);}finally{db.close();}
+  try{const tx=db.transaction("meta","readwrite");tx.objectStore("meta").put(cursor,"memory_cursor:"+namespace);await transactionDone(tx);}finally{db.close();}
 }
-async function loadCursor():Promise<string|undefined>{
+async function loadCursor(namespace:string):Promise<string|undefined>{
   const db=await openDb();
   try{return await new Promise((resolve,reject)=>{
-    const r=db.transaction("meta","readonly").objectStore("meta").get("memory_cursor");
+    const r=db.transaction("meta","readonly").objectStore("meta").get("memory_cursor:"+namespace);
     r.onsuccess=()=>resolve(typeof r.result==="string"?r.result:undefined);r.onerror=()=>reject(r.error);
   });}finally{db.close();}
 }
@@ -143,21 +143,21 @@ export class NeoDeviceClient {
     return {status:"queued_offline",kind,idempotency_key:idempotencyKey,queued_at:item.createdAt};
   }
   async syncMemory(cursor?:string,includePending=false){
-    const activeCursor=cursor??await loadCursor();
+    const activeCursor=cursor??await loadCursor(this.deviceId);
     const q=new URLSearchParams(); if(activeCursor)q.set("cursor",activeCursor); if(includePending)q.set("include_pending","true");
     let response:Response;
     try{response=await this.request("/memory?"+q.toString());}
-    catch{return {records:await readCachedMemory(includePending),next_cursor:activeCursor??null,offline:true};}
+    catch{return {records:await readCachedMemory(includePending,this.deviceId),next_cursor:activeCursor??null,offline:true};}
     if(!response.ok)throw new Error("Memory sync failed: "+response.status);
     const payload=await response.json() as {records?:Record<string,unknown>[];next_cursor?:string|null};
     const records=payload.records||[];
-    await cacheMemory(records);
-    if(payload.next_cursor)await saveCursor(payload.next_cursor);
+    await cacheMemory(records,this.deviceId);
+    if(payload.next_cursor)await saveCursor(payload.next_cursor,this.deviceId);
     return {...payload,offline:false};
   }
-  async getCachedMemory(includePending=false){return readCachedMemory(includePending);}
+  async getCachedMemory(includePending=false){return readCachedMemory(includePending,this.deviceId);}
   async createMemory(input:{memory_id:string;payload_ciphertext:string;payload_nonce:string;key_version:number;source_kind?:string}){
-    const key=randomId(),body=JSON.stringify(input);
+    const key=randomId(),body=JSON.stringify({memory_id:input.memory_id,payload_ciphertext:input.payload_ciphertext,payload_nonce:input.payload_nonce,key_version:input.key_version,...(input.source_kind===undefined?{}:{source_kind:input.source_kind})});
     let response:Response;
     try{response=await this.request("/memory",{method:"POST",headers:{"idempotency-key":key},body});}
     catch{return this.enqueue("memory.create","/memory",body,key);}
@@ -175,7 +175,7 @@ export class NeoDeviceClient {
     input:{task_kind:string;payload_ciphertext:string;payload_nonce:string;key_version:number;required_capabilities?:string[]},
     idempotencyKey=randomId(),
   ){
-    const body=JSON.stringify(input);
+    const body=JSON.stringify({task_kind:input.task_kind,payload_ciphertext:input.payload_ciphertext,payload_nonce:input.payload_nonce,key_version:input.key_version,...(input.required_capabilities===undefined?{}:{required_capabilities:input.required_capabilities})});
     let response:Response;
     try{response=await this.request("/tasks",{method:"POST",headers:{"idempotency-key":idempotencyKey},body});}
     catch{return this.enqueue("task.enqueue","/tasks",body,idempotencyKey);}

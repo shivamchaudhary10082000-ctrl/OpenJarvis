@@ -236,11 +236,15 @@ async function route(req: Request, env: Env): Promise<Response> {
     if (path === "/tasks" && req.method === "POST") {
       const x=await bodyJson<any>(req,env);
       if (!validCipher(x) || typeof x.task_kind!=="string" || !/^[a-z][a-z0-9_.-]{1,63}$/.test(x.task_kind)) return fail(400,"invalid_task","Task must contain encrypted payload and a valid task kind");
+      const requiredCapabilities = x.required_capabilities === undefined ? [] : x.required_capabilities;
+      if (!Array.isArray(requiredCapabilities) || requiredCapabilities.length > 32 ||
+          requiredCapabilities.some((v: unknown) => typeof v !== "string" || !/^[a-z][a-z0-9_.-]{0,63}$/.test(v)) ||
+          new Set(requiredCapabilities).size !== requiredCapabilities.length) return fail(400,"invalid_capabilities","required_capabilities must be up to 32 unique capability identifiers");
       const key=req.headers.get("idempotency-key")||"";
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(key)) return fail(400,"idempotency_required","A valid Idempotency-Key is required");
       const task=id();
       try {
-        await env.DB.prepare("INSERT INTO task_leases(task_id,account_id,task_kind,state,idempotency_key,payload_ciphertext,payload_nonce,key_version,created_at,updated_at) VALUES(?,?,?,'queued',?,?,?,?,?,?)").bind(task,account,x.task_kind,key,b64u(x.payload_ciphertext),b64u(x.payload_nonce),x.key_version,now(),now()).run();
+        await env.DB.prepare("INSERT INTO task_leases(task_id,account_id,task_kind,state,idempotency_key,payload_ciphertext,payload_nonce,key_version,created_at,updated_at,required_capabilities_json) VALUES(?,?,?,'queued',?,?,?,?,?,?,?)").bind(task,account,x.task_kind,key,b64u(x.payload_ciphertext),b64u(x.payload_nonce),x.key_version,now(),now(),JSON.stringify(requiredCapabilities)).run();
       } catch {
         const existing=await env.DB.prepare("SELECT task_id,state FROM task_leases WHERE account_id=? AND idempotency_key=?").bind(account,key).first();
         if (existing) return json(existing,200);
@@ -253,7 +257,7 @@ async function route(req: Request, env: Env): Promise<Response> {
       const leaseSeconds=Math.min(300,Math.max(30,Number(x.lease_seconds)||90));
       const t=now();
       await env.DB.prepare("UPDATE task_leases SET state='queued', assigned_device_id=NULL, lease_expires_at=NULL, updated_at=? WHERE account_id=? AND state IN ('leased','running') AND lease_expires_at IS NOT NULL AND lease_expires_at < ?").bind(t,account,t).run();
-      const task=await env.DB.prepare("SELECT task_id,task_kind,payload_ciphertext,payload_nonce,key_version FROM task_leases WHERE account_id=? AND state='queued' ORDER BY created_at LIMIT 1").bind(account).first<any>();
+      const task=await env.DB.prepare("SELECT t.task_id,t.task_kind,t.payload_ciphertext,t.payload_nonce,t.key_version FROM task_leases t JOIN devices d ON d.device_id=? AND d.account_id=t.account_id WHERE t.account_id=? AND t.state='queued' AND NOT EXISTS (SELECT 1 FROM json_each(t.required_capabilities_json) required WHERE NOT EXISTS (SELECT 1 FROM json_each(d.capabilities_json) available WHERE available.value=required.value)) ORDER BY t.created_at LIMIT 1").bind(device.device_id,account).first<any>();
       if (!task) return json({task:null});
       const updated=await env.DB.prepare("UPDATE task_leases SET state='leased',assigned_device_id=?,lease_expires_at=?,updated_at=? WHERE task_id=? AND state='queued'").bind(device.device_id,t+leaseSeconds,t,task.task_id).run();
       return updated.meta.changes ? json({task:{...task,state:"leased",lease_expires_at:t+leaseSeconds}}) : json({task:null});

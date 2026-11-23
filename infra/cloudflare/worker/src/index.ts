@@ -263,6 +263,9 @@ async function route(req: Request, env: Env): Promise<Response> {
   }
   const { account, device } = auth;
   try {
+    if (path === "/devices/heartbeat" && req.method === "POST") {
+      return json({ device_id: device.device_id, status: "active", last_seen_at: now(), server_time: now() });
+    }
     if (path === "/devices" && req.method === "GET") {
       const result = await env.DB.prepare("SELECT device_id, label, platform, capabilities_json, created_at, last_seen_at, revoked_at FROM devices WHERE account_id = ? ORDER BY created_at").bind(account).all();
       const devices = result.results.map((row: any) => {
@@ -271,6 +274,7 @@ async function route(req: Request, env: Env): Promise<Response> {
         return {
           device_id: row.device_id, label: row.label, platform: row.platform, capabilities,
           status: row.revoked_at === null ? "active" : "revoked",
+          presence: row.revoked_at !== null ? "revoked" : (row.last_seen_at !== null && Number(row.last_seen_at) >= now() - 90 ? "online" : "offline"),
           created_at: row.created_at, last_seen_at: row.last_seen_at,
         };
       });

@@ -10,6 +10,7 @@ export interface Env {
   MODEL_BACKUP_API_KEY?: string;
   NEO_ENV?: string;
   MAX_BODY_BYTES?: string;
+  MAX_REQUESTS_PER_MINUTE?: string;
 }
 type Claims = { sub: string; iss: string; aud: string | string[]; exp: number; email?: string };
 type Device = { device_id: string; account_id: string; public_key_jwk: string; revoked_at: number | null };
@@ -19,6 +20,16 @@ const fail = (status: number, code: string, message: string) => json({ error: { 
 const b64u = (s: string) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - s.length % 4) % 4)), c => c.charCodeAt(0));
 const enc = new TextEncoder();
 const now = () => Math.floor(Date.now() / 1000);
+class RateLimitExceeded extends Error {}
+async function enforceAccountRateLimit(account: string, env: Env): Promise<void> {
+  const configured = Number(env.MAX_REQUESTS_PER_MINUTE || 60);
+  const limit = Number.isSafeInteger(configured) && configured > 0 ? Math.min(configured, 600) : 60;
+  const windowStart = Math.floor(now() / 60) * 60;
+  const row = await env.DB.prepare("INSERT INTO api_rate_limits(account_id,window_start,request_count) VALUES(?,?,1) ON CONFLICT(account_id) DO UPDATE SET request_count=CASE WHEN api_rate_limits.window_start=excluded.window_start THEN api_rate_limits.request_count+1 ELSE 1 END, window_start=excluded.window_start WHERE api_rate_limits.window_start<>excluded.window_start OR api_rate_limits.request_count < ? RETURNING request_count")
+    .bind(account, windowStart, limit).first<{ request_count: number }>();
+  if (!row) throw new RateLimitExceeded("Account request rate limit exceeded");
+}
+
 function jsonBodyLimit(env: Env): number {
   const configured = Number(env.MAX_BODY_BYTES || 1_000_000);
   return Number.isSafeInteger(configured) && configured > 0 ? Math.min(configured, 5_000_000) : 1_000_000;
@@ -124,6 +135,7 @@ async function authenticate(req: Request, env: Env): Promise<{ account: string; 
       await env.DB.prepare("INSERT INTO device_nonces(device_id, nonce, expires_at) VALUES(?, ?, ?)").bind(deviceId, nonce, ts + 600).run();
     } catch { throw new Error("Replayed device request"); }
   }
+  await enforceAccountRateLimit(account, env);
   await env.DB.prepare("UPDATE devices SET last_seen_at = ? WHERE device_id = ? AND account_id = ?").bind(now(), deviceId, account).run();
   return { account, device: row };
 }
@@ -173,6 +185,7 @@ async function route(req: Request, env: Env): Promise<Response> {
   }
   let auth: { account: string; device: Device };
   try { auth = await authenticate(req, env); } catch (e) {
+    if (e instanceof RateLimitExceeded) return fail(429, "rate_limited", "Account request rate limit exceeded; retry after the current minute");
     const message = e instanceof Error ? e.message : "Authentication failed";
     return fail(message.includes("revoked") || message.includes("not enrolled") ? 403 : 401, "unauthorized", message);
   }

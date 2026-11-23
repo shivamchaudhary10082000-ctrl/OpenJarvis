@@ -41,4 +41,4 @@ All non-test defaults for budgets, model pricing and voice ceilings are zero. Th
 
 ## Not yet complete
 
-No Cloudflare resources are provisioned. R2, Durable Object coordination, automated spend-reservation reconciliation, budget alerts, local model inference fallback, background outbox retry scheduling, remote D1 staging tests, rollback/restore rehearsal and independent penetration testing remain outstanding.
+A Wrangler deployment dry-run against the test configuration passes in CI, but no Cloudflare resources are provisioned. R2, Durable Object coordination, automated spend-reservation reconciliation, budget alerts, local model inference fallback, background outbox retry scheduling, remote D1 staging tests, rollback/restore rehearsal and independent penetration testing remain outstanding.

@@ -609,9 +609,29 @@ export async function cleanupExpiredDeviceNonces(env: Env): Promise<number> {
   const result = await env.DB.prepare("DELETE FROM device_nonces WHERE expires_at < ?").bind(now()).run();
   return Number(result.meta.changes || 0);
 }
+
+/**
+ * Reconcile reservations left open by a Worker termination or lost upstream
+ * response. Since provider billing may have happened even when our response
+ * was lost, never release these holds: conservatively settle the full reserved
+ * USD and token ceilings. A 30-minute age threshold avoids racing ordinary
+ * provider requests; the conditional state predicate makes repeated cron runs
+ * idempotent.
+ */
+export async function reconcileStaleProviderSpendReservations(
+  env: Env,
+  staleBefore = now() - 30 * 60,
+  settledAt = now(),
+): Promise<number> {
+  const result = await env.DB.prepare(
+    "UPDATE provider_spend_reservations SET state='settled', settled_microusd=reserved_microusd, settled_input_tokens=reserved_input_tokens, settled_output_tokens=reserved_output_tokens, settled_at=? WHERE state='reserved' AND created_at <= ?",
+  ).bind(settledAt, staleBefore).run();
+  return Number(result.meta.changes || 0);
+}
 export default {
   fetch: (req:Request,env:Env) => route(req,env),
   scheduled: async (_controller: ScheduledController, env: Env) => {
     await cleanupExpiredDeviceNonces(env);
+    await reconcileStaleProviderSpendReservations(env);
   },
 };

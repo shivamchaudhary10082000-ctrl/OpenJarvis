@@ -294,8 +294,10 @@ describe("D1-backed provider budgets, failover, and voice", () => {
   it("fails over to the backup, discloses the route, and settles the D1 reservation", async () => {
     const device = await enrolDevice("provider-failover-" + crypto.randomUUID(), "Provider test device");
     const upstreamCalls: string[] = [];
-    mockAccessCerts(async (url) => {
+    let forwardedBody: Record<string, unknown> | null = null;
+    mockAccessCerts(async (url, init) => {
       upstreamCalls.push(url);
+      if (url.startsWith("https://backup.provider.test/") && typeof init?.body === "string") forwardedBody = JSON.parse(init.body) as Record<string, unknown>;
       if (url.startsWith("https://primary.provider.test/")) {
         return new Response(JSON.stringify({ error: "primary unavailable" }), { status: 503 });
       }
@@ -309,7 +311,7 @@ describe("D1-backed provider budgets, failover, and voice", () => {
     const response = await call(device, "/v1/chat/completions", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: "auto", messages: [{ role: "user", content: "Hello" }] }),
+      body: JSON.stringify({ model: "auto", allow_fallback: true, max_completion_tokens: 32, messages: [{ role: "user", content: "Hello" }] }),
     });
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
@@ -317,6 +319,9 @@ describe("D1-backed provider budgets, failover, and voice", () => {
       neo: { provider: "backup-model", tier: "backup", fallback_used: true },
     });
     expect(upstreamCalls).toHaveLength(2);
+    expect(forwardedBody).not.toHaveProperty("allow_fallback");
+    expect(forwardedBody).toMatchObject({ max_completion_tokens: 32 });
+    expect(forwardedBody).not.toHaveProperty("max_tokens");
 
     const usage = await bindings.DB.prepare(
       "SELECT reserved_microusd, spent_microusd FROM provider_spend_usage WHERE account_id = ?",
@@ -357,6 +362,28 @@ describe("D1-backed provider budgets, failover, and voice", () => {
     expect(blocked.status).toBe(429);
     expect(await blocked.json()).toMatchObject({ error: { code: "spend_budget_exceeded" } });
     expect(primaryCalls).toBe(2);
+  });
+
+  it("rejects malformed model routing policy before any provider call", async () => {
+    const device = await enrolDevice("provider-policy-validation-" + crypto.randomUUID(), "Policy validation device");
+    let providerCalls = 0;
+    mockAccessCerts(async () => {
+      providerCalls++;
+      return new Response(JSON.stringify({ choices: [] }), { status: 200 });
+    });
+    const invalidFallback = await call(device, "/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "auto", allow_fallback: "false", messages: [{ role: "user", content: "x" }] }),
+    });
+    expect(invalidFallback.status).toBe(400);
+    const invalidModel = await call(device, "/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: 123, messages: [{ role: "user", content: "x" }] }),
+    });
+    expect(invalidModel.status).toBe(400);
+    expect(providerCalls).toBe(0);
   });
 
   it("honours allow_fallback=false and never contacts the backup provider", async () => {

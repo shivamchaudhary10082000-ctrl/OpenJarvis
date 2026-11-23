@@ -463,3 +463,58 @@ describe("D1-backed encrypted memory and task concurrency", () => {
     });
   });
 });
+
+
+describe("D1 spend ledger invariants", () => {
+  it("admits only reservations that fit under the monthly cap under concurrency", async () => {
+    const account = "spend-race-" + crypto.randomUUID();
+    const month = new Date().toISOString().slice(0, 7);
+    await bindings.DB.prepare(
+      "INSERT INTO accounts(account_id, created_at, status) VALUES(?, ?, 'active')",
+    ).bind(account, Math.floor(Date.now() / 1000)).run();
+    await bindings.DB.prepare(
+      "INSERT INTO provider_spend_usage(account_id, month_key, budget_microusd, reserved_microusd, spent_microusd, updated_at) VALUES(?,?,1000,0,0,?)",
+    ).bind(account, month, Math.floor(Date.now() / 1000)).run();
+
+    const attempts = await Promise.all(Array.from({ length: 10 }, (_, index) =>
+      bindings.DB.prepare(
+        "INSERT INTO provider_spend_reservations(reservation_id, account_id, month_key, reserved_microusd, state, provider_label, created_at) VALUES(?,?,?,200,'reserved',?,?)",
+      ).bind(crypto.randomUUID(), account, month, "race-" + index, Math.floor(Date.now() / 1000)).run()
+        .then(() => true)
+        .catch(() => false),
+    ));
+    expect(attempts.filter(Boolean)).toHaveLength(5);
+    const usage = await bindings.DB.prepare(
+      "SELECT reserved_microusd, spent_microusd FROM provider_spend_usage WHERE account_id=? AND month_key=?",
+    ).bind(account, month).first<{ reserved_microusd: number; spent_microusd: number }>();
+    expect(usage).toMatchObject({ reserved_microusd: 1000, spent_microusd: 0 });
+  });
+
+  it("rejects settlement above the reservation and accepts settlement within it", async () => {
+    const account = "spend-settle-" + crypto.randomUUID();
+    const month = new Date().toISOString().slice(0, 7);
+    const timestamp = Math.floor(Date.now() / 1000);
+    await bindings.DB.prepare(
+      "INSERT INTO accounts(account_id, created_at, status) VALUES(?, ?, 'active')",
+    ).bind(account, timestamp).run();
+    await bindings.DB.prepare(
+      "INSERT INTO provider_spend_usage(account_id, month_key, budget_microusd, reserved_microusd, spent_microusd, updated_at) VALUES(?,?,1000,0,0,?)",
+    ).bind(account, month, timestamp).run();
+    const reservation = crypto.randomUUID();
+    await bindings.DB.prepare(
+      "INSERT INTO provider_spend_reservations(reservation_id, account_id, month_key, reserved_microusd, state, provider_label, created_at) VALUES(?,?,?,300,'reserved','settlement-test',?)",
+    ).bind(reservation, account, month, timestamp).run();
+
+    await expect(bindings.DB.prepare(
+      "UPDATE provider_spend_reservations SET state='settled', settled_microusd=301, settled_at=? WHERE reservation_id=?",
+    ).bind(timestamp, reservation).run()).rejects.toThrow(/spend_settlement_exceeds_reservation/);
+
+    await bindings.DB.prepare(
+      "UPDATE provider_spend_reservations SET state='settled', settled_microusd=250, settled_at=? WHERE reservation_id=?",
+    ).bind(timestamp, reservation).run();
+    const usage = await bindings.DB.prepare(
+      "SELECT reserved_microusd, spent_microusd FROM provider_spend_usage WHERE account_id=? AND month_key=?",
+    ).bind(account, month).first<{ reserved_microusd: number; spent_microusd: number }>();
+    expect(usage).toMatchObject({ reserved_microusd: 0, spent_microusd: 250 });
+  });
+});

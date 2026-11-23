@@ -33,12 +33,12 @@ Voice requests require VOICE_TRANSCRIBE_MAX_COST_USD_MICROS or VOICE_SYNTHESIS_M
 
 Run npm install, Redocly OpenAPI lint, npm run check, npm run deploy:dry-run and npm test.
 
-Vitest runs in the Cloudflare Workers runtime with local SQLite-backed D1 and applies migrations 0001–0008. Latest verified run #71 passed: Redocly lint (no warnings), TypeScript check, Wrangler deploy dry-run, npm audit (0 vulnerabilities) and 2 test files / 40 tests. The dry-run built a 43.34 KiB Worker (10.42 KiB gzip). This is local integration evidence, not remote D1 or staging proof.
+Vitest runs in the Cloudflare Workers runtime with local SQLite-backed D1 and applies migrations 0001–0008. Latest verified run #87 passed: Redocly lint (no warnings), TypeScript check, Wrangler deploy dry-run, npm audit (0 vulnerabilities) and 2 test files / 43 tests. The dry-run built a 43.82 KiB Worker (10.53 KiB gzip). This is local integration evidence, not remote D1 or staging proof.
 
 ## Offline clients
 
-- Web client: non-exportable P-256 identity in IndexedDB, per-device encrypted memory cache, durable ciphertext-only outbox, idempotent memory/task replay, and caller-driven flushOutbox().
-- Android client: Android Keystore P-256 identity and SQLite ciphertext-only memory cache/outbox with idempotent replay.
+- Web client: non-exportable P-256 identity in IndexedDB, account-scoped encrypted memory cache with tombstone-aware recall, durable ciphertext-only outbox, idempotent memory/task replay, and caller-driven flushOutbox().
+- Android client: Android Keystore P-256 identity and account-scoped SQLite ciphertext-only memory cache/outbox with idempotent replay.
 - Both expose heartbeat calls. The host application must schedule heartbeat and outbox flush when connected.
 - Offline mode currently supports encrypted cached memory and queued writes/tasks; **local model inference fallback is not implemented**.
 

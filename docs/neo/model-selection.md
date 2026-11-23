@@ -38,3 +38,16 @@ Pricing and model IDs change. Re-check official provider pricing and deprecation
 Run the same `hinglish_v1.jsonl` corpus against each candidate using the evaluation runner. Blind-score the answers on language naturalness, intent, continuity, correctness, safety, and instruction-following. Measure p50/p95 latency, error rate, and cost per 100 conversations. Require a human-reviewed sample and a hard monthly budget before any candidate becomes primary.
 
 A fallback is allowed only when its lower quality tier is visible in response metadata and, where material, disclosed to the user. Never silently route a user from a strong cloud model to a weak local model.
+
+
+## Runtime budget configuration gate
+
+NEO now has D1-backed per-account monthly USD-micro spend reservations plus monthly input/output token budgets. The non-test Wrangler defaults for all budget and price values are zero, which intentionally blocks inference.
+
+Before enabling a provider, independently verify the current model's input/output price and set:
+- MODEL_PRIMARY_INPUT_USD_MICROS_PER_1M and MODEL_PRIMARY_OUTPUT_USD_MICROS_PER_1M;
+- equivalent backup rates if backup routing is enabled;
+- owner-approved MAX_MONTHLY_SPEND_USD_MICROS, MAX_MONTHLY_INPUT_TOKENS, and MAX_MONTHLY_OUTPUT_TOKENS;
+- conservative VOICE_TRANSCRIBE_MAX_COST_USD_MICROS and VOICE_SYNTHESIS_MAX_COST_USD_MICROS per-request ceilings.
+
+The USD-micro pricing values are manually maintained and must match the configured provider/model. Do not assume a model ID's pricing from an older evaluation. Voice ceilings must cover the maximum accepted payload/duration. No provider credentials or paid calls are enabled by this repository change.

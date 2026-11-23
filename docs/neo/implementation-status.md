@@ -22,25 +22,25 @@ This report separates source implementation from tested behavior and from produc
 | Provider spend controls | Implemented, fail-closed | Per-account monthly USD-micro cap; per-provider input/output pricing; prompt byte and per-request output-token ceilings; monthly input/output token caps; atomic D1 reservations and settlement triggers. |
 | Voice spend controls | Implemented, fail-closed | Voice transcription/synthesis require a reviewed maximum per-request cost and share the monthly spend cap. |
 | Model routing | Implemented | Primary/backup routing, explicit model no-fallback behavior, auto, allow_fallback=false, and provider/tier/fallback metadata. |
-| Web client | Source implemented; TypeScript checked | Non-exportable P-256 key in IndexedDB; encrypted memory cache; durable ciphertext-only outbox; idempotent replay; manual flush; heartbeat; task and voice transport. |
-| Android client | Starter source implemented; not built on Android CI | Android Keystore P-256 identity; SQLite ciphertext-only cache/outbox; idempotent replay; heartbeat; signed requests and voice transport. |
+| Web client | Source implemented; TypeScript checked | Per-account non-exportable P-256 key in IndexedDB; account-scoped encrypted memory cache with tombstone-aware recall; durable ciphertext-only outbox; idempotent replay; manual flush; heartbeat; task and voice transport. |
+| Android client | Starter source implemented; not built on Android CI | Per-account Android Keystore P-256 identity; account-scoped SQLite ciphertext-only cache/outbox; idempotent replay; heartbeat; signed requests and voice transport. |
 | API contract | Draft OpenAPI 3.1 | Device, memory, task, chat and voice routes; Redocly lint passes in CI. |
 
 ## Verification evidence
 
 Latest NEO Worker run at the time of this report:
 
-- Workflow run #71: **Success**
-- Tested commit: 6c3c03896585d826b29e1d7a96a58ae57b588be3
+- Workflow run #87: **Success**
+- Tested commit: 2297ddfd492410047fc2ea4ed8e9675b615ec25f
 - npm install --ignore-scripts: passed; npm reported 0 vulnerabilities.
 - npm run check: passed.
 - npm test: passed.
-- Vitest: **2 test files, 40 tests passed**.\n- Redocly OpenAPI 3.1 lint: passed with no warnings.\n- Wrangler deployment dry-run using the test config: passed; Worker bundle 43.34 KiB (10.42 KiB gzip).
+- Vitest: **2 test files, 43 tests passed**.\n- Redocly OpenAPI 3.1 lint: passed with no warnings.\n- Wrangler deployment dry-run using the test config: passed; Worker bundle 43.34 KiB (10.42 KiB gzip).
 
 D1-backed integration coverage includes:
 - Valid/invalid Access JWT signature, issuer, audience and expiry.
 - Device signature, nonce replay, cross-account isolation, enrolment and revocation.
-- Device online/offline presence, heartbeat and scheduled expired-nonce cleanup.
+- Device online/offline presence, heartbeat and scheduled expired-nonce cleanup. Local client storage is isolated by a hashed stable account scope.
 - D1 rate limiting.
 - Concurrent memory revision allocation and memory idempotency.
 - Task idempotency, capability filtering, competing leases and expired-lease recovery.
@@ -69,7 +69,7 @@ Input-token reservation uses serialized request bytes as a conservative upper bo
 1. **Staging and operational validation:** No Cloudflare account resources have been provisioned; remote D1 migration rehearsal, staging deployment, rollback, restore and deletion tests remain.
 2. **Real provider compatibility:** All provider/voice integration tests use mocks. Test real provider error formats, timeouts, malformed/missing usage, voice duration pricing and backup independence after credentials and budget are approved.
 3. **Budget operations:** Pricing is manually configured and can drift. Add a documented pricing review/update process, budget dashboard/alerts, reservation reconciliation and operator audit trail. Current caps are per account, not a global shared-provider-key ceiling.
-4. **Offline behavior:** Web/Android cache and outbox are source implemented, but browser IndexedDB and Android SQLite behavior have not been exercised on real devices. Outbox flush is caller-driven; no automatic background scheduler/backoff exists.
+4. **Offline behavior:** Web/Android cache and outbox are source implemented, but browser IndexedDB and Android SQLite behavior have not been exercised on real devices. Account-scoped namespaces and tombstone-aware reads are source implemented; native persistence still needs runtime tests. Outbox flush is caller-driven; no automatic background scheduler/backoff exists.
 5. **Local inference fallback:** Not implemented. Offline mode currently provides encrypted cached memory and queued writes/tasks, not an equivalent local AI model.
 6. **Browser security:** Add strict CSP, dependency/XSS controls, secure Access-token lifecycle, persistence/recovery tests and device re-enrolment flow.
 7. **Native app integration:** Android code is a transport/storage primitive, not a built application. No Gradle app/test project, Access login UI, microphone permission UX, background worker or real-device test exists. iOS and desktop integrations are absent.

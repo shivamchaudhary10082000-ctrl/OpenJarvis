@@ -7,7 +7,7 @@ This is the first executable NEO API gateway implementation. It is source code w
 - Cloudflare Access JWT verification (RS256, issuer, audience, expiry) and account/device binding.
 - First-device and additional-device enrolment using a client-generated P-256 public key.
 - Signed device requests with a five-minute timestamp window and one-use nonce replay protection.
-- Device listing, online freshness indicator, authenticated heartbeat and immediate revocation.
+- Device listing, online freshness indicator, authenticated heartbeat and immediate revocation; scheduled cleanup removes expired nonce replay records every 15 minutes.
 - Client-encrypted memory create/sync, pending-by-default trust, explicit approval into a new immutable revision, tombstones and opaque rowid cursor.
 - Memory-write and task-enqueue idempotency keys with request hashes; key reuse with different content returns 409.
 - Encrypted task enqueue, capability-aware claims, expiring leases, concurrent claim protection and recovery after lease expiry.
@@ -33,7 +33,7 @@ Voice requests require VOICE_TRANSCRIBE_MAX_COST_USD_MICROS or VOICE_SYNTHESIS_M
 
 Run npm install, npm run check and npm test.
 
-Vitest runs in the Cloudflare Workers runtime with local SQLite-backed D1 and applies migrations 0001–0008. Latest verified run #53 passed: 2 test files, 39 tests, TypeScript check and npm dependency audit. This is local integration evidence, not remote D1 or staging proof.
+Vitest runs in the Cloudflare Workers runtime with local SQLite-backed D1 and applies migrations 0001–0008. Latest verified run #60 passed: 2 test files, 40 tests, TypeScript check and npm dependency audit. This is local integration evidence, not remote D1 or staging proof.
 
 ## Offline clients
 

@@ -81,6 +81,28 @@ paths:
                 $ref: "#/components/schemas/DeviceEnrollment"
         "409":
           $ref: "#/components/responses/Conflict"
+  /devices/heartbeat:
+    post:
+      summary: Refresh the authenticated device's online presence
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Device heartbeat accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device_id, status, last_seen_at, server_time]
+                properties:
+                  device_id:
+                    type: string
+                  status:
+                    const: active
+                  last_seen_at:
+                    type: integer
+                  server_time:
+                    type: integer
   /devices/{deviceId}:
     delete:
       summary: Revoke a device immediately

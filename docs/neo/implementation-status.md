@@ -13,8 +13,8 @@ This is a source-code and integration status report, not a claim that NEO is pro
 |---|---|---|
 | Product architecture | Documented | Cloud-first, device-independent identity; devices are clients/optional workers, not the permanent brain. |
 | Memory trust model | Implemented in OpenJarvis source | User-authored evidence, pending-by-default candidates, explicit approval/rejection, quarantine handling, and CLI flows. |
-| Cloud API foundation | Source implemented | Worker routes for Access JWT validation, device proof, nonce replay protection, device revocation, encrypted memory, tasks, model routing, and voice proxy. |
-| D1 schema | Four ordered migrations | Core account/device/memory/task/audit tables, device nonces, task capability requirements, and per-account rate-limit counter. |
+| Cloud API foundation | Source implemented | Worker routes for Access JWT validation, device proof, nonce replay protection, device revocation, encrypted memory, tasks, model routing, and voice proxy. |\n| Provider spend control | Source implemented; fail-closed defaults | Per-account monthly USD-micro budget, atomic D1 reservation/settlement triggers, per-provider input/output pricing, prompt-byte and output-token ceilings; chat and voice blocked unless explicit positive budget/pricing ceilings are configured. |
+| D1 schema | Five ordered migrations | Core account/device/memory/task/audit tables, device nonces, task capability requirements, per-account rate-limit counter, and monthly spend reservation ledger with atomic triggers. |
 | Memory sync | Hardened | Rowid keyset cursor; encrypted D1 BLOBs serialized as base64url on the API boundary. |
 | Model routing | Hardened | Explicit model selection does not silently fall back; `auto` and `allow_fallback` are handled; route metadata discloses provider/tier/fallback. |
 | Request limits | Source implemented | JSON body default 1 MB (configurable, hard-capped at 5 MB); voice body 15 MB; D1-backed account rate limit default 60 requests/minute (configurable up to 600). |
@@ -26,10 +26,10 @@ This is a source-code and integration status report, not a claim that NEO is pro
 
 ## Not complete — engineering blockers
 
-1. **Hard provider spend ceiling:** Rate limiting reduces abuse but does not cap financial exposure. We still need a selected provider/model, authoritative pricing inputs, maximum request/output limits, and an owner-approved monthly budget before implementing fail-closed spend reservation and reconciliation.
+1. **Provider spend ceiling:** Fail-closed D1 reservations and settlement are implemented. The checked-in default monthly budget and all provider pricing/voice ceilings are zero, so inference remains blocked until a provider/model, authoritative current pricing, and owner-approved monthly budget are configured. Tests and fresh CI execution remain pending.
 2. **Worker CI:** The latest PR head has no Actions run or status check. TypeScript compilation and Vitest results for the latest changes are unverified.
 3. **D1-backed integration tests:** Valid/invalid Access JWT signature, issuer, audience and expiry; device signature; nonce replay; revocation; account isolation; rate-limit enforcement; concurrent memory revisions; task lease races/expiry; and capability-aware claiming.
-4. **Provider/voice integration tests:** Exercise primary failure, backup selection, explicit model failure, `auto`, `allow_fallback=false`, upload boundary and upstream failure with test credentials/mocks.
+4. **Provider/voice integration tests:** Provider failover, explicit primary no-fallback, monthly spend exhaustion, and transcription upload forwarding tests are implemented; fresh CI execution and broader synthesis/upstream-failure coverage remain pending.
 5. **Browser client hardening:** Add CSP, dependency/XSS controls, secure Access-token lifecycle, browser persistence tests, and device recovery/re-enrolment behavior.
 6. **Offline continuity:** Encrypted local cache, durable encrypted outbox, conflict/retry/replay behavior, and an explicitly lower-tier local inference fallback are not implemented.
 7. **Device coordination:** Device presence/heartbeat, health checks, online compute availability, capability grant/revocation workflow, and resilient task recovery need implementation and tests.

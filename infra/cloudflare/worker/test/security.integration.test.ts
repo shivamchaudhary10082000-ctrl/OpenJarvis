@@ -41,8 +41,8 @@ async function accessToken(
   return input + "." + base64Url(signature);
 }
 
-function mockAccessCerts(): void {
-  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+function mockAccessCerts(upstream?: (url: string, init?: RequestInit) => Response | Promise<Response>): void {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const requested = String(input);
     if (requested === issuer + "/cdn-cgi/access/certs") {
       return new Response(JSON.stringify({ keys: [accessPublicJwk] }), {
@@ -50,6 +50,7 @@ function mockAccessCerts(): void {
         headers: { "content-type": "application/json" },
       });
     }
+    if (upstream) return upstream(requested, init);
     return new Response(JSON.stringify({ error: "unexpected upstream request" }), {
       status: 502,
       headers: { "content-type": "application/json" },
@@ -102,9 +103,16 @@ async function signedRequest(
   nonceOverride?: string,
 ): Promise<Request> {
   const url = new URL(path, baseUrl);
-  const bodyText = typeof init.body === "string" ? init.body : "";
-  const bodyBytes = encoder.encode(bodyText);
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bodyBytes.buffer));
+  const bodyBytes = typeof init.body === "string"
+    ? encoder.encode(init.body)
+    : init.body instanceof Uint8Array
+      ? new Uint8Array(init.body)
+      : init.body instanceof ArrayBuffer
+        ? new Uint8Array(init.body)
+        : new Uint8Array();
+  const ownedBodyBytes = new Uint8Array(bodyBytes.byteLength);
+  ownedBodyBytes.set(bodyBytes);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", ownedBodyBytes.buffer));
   const bodyHash = Array.from(digest, byte => byte.toString(16).padStart(2, "0")).join("");
   const timestamp = Math.floor(Date.now() / 1000);
   const nonce = nonceOverride || base64Url(crypto.getRandomValues(new Uint8Array(18)));
@@ -240,6 +248,98 @@ describe("D1-backed Access and device proof", () => {
     }
     const limited = await call(device, "/v1/devices");
     expect(limited.status).toBe(429);
+  });
+});
+
+describe("D1-backed provider budgets, failover, and voice", () => {
+  it("fails over to the backup, discloses the route, and settles the D1 reservation", async () => {
+    const device = await enrolDevice("provider-failover-" + crypto.randomUUID(), "Provider test device");
+    const upstreamCalls: string[] = [];
+    mockAccessCerts(async (url) => {
+      upstreamCalls.push(url);
+      if (url.startsWith("https://primary.provider.test/")) {
+        return new Response(JSON.stringify({ error: "primary unavailable" }), { status: 503 });
+      }
+      return new Response(JSON.stringify({
+        id: "test-response",
+        choices: [{ message: { role: "assistant", content: "backup response" } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+
+    const response = await call(device, "/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "auto", messages: [{ role: "user", content: "Hello" }] }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      choices: [{ message: { content: "backup response" } }],
+      neo: { provider: "backup-model", tier: "backup", fallback_used: true },
+    });
+    expect(upstreamCalls).toHaveLength(2);
+
+    const usage = await bindings.DB.prepare(
+      "SELECT reserved_microusd, spent_microusd FROM provider_spend_usage WHERE account_id = ?",
+    ).bind(device.account).first<{ reserved_microusd: number; spent_microusd: number }>();
+    expect(usage?.reserved_microusd).toBe(0);
+    expect(usage?.spent_microusd).toBeGreaterThan(0);
+  });
+
+  it("does not call the backup for an explicit primary model and blocks requests at the monthly cap", async () => {
+    const device = await enrolDevice("provider-cap-" + crypto.randomUUID(), "Budget test device");
+    let primaryCalls = 0;
+    let backupCalls = 0;
+    mockAccessCerts(async (url) => {
+      if (url.startsWith("https://primary.provider.test/")) {
+        primaryCalls++;
+        return new Response(JSON.stringify({ error: "primary unavailable" }), { status: 503 });
+      }
+      if (url.startsWith("https://backup.provider.test/")) backupCalls++;
+      return new Response(JSON.stringify({ choices: [] }), { status: 200 });
+    });
+
+    const request = () => call(device, "/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "primary-model", messages: [{ role: "user", content: "A" }] }),
+    });
+    const first = await request();
+    expect(first.status).toBe(502);
+    expect(primaryCalls).toBe(1);
+    expect(backupCalls).toBe(0);
+
+    const blocked = await request();
+    expect(blocked.status).toBe(429);
+    expect(await blocked.json()).toMatchObject({ error: { code: "spend_budget_exceeded" } });
+    expect(primaryCalls).toBe(1);
+  });
+
+  it("proxies transcription audio and records the configured maximum request cost", async () => {
+    const device = await enrolDevice("voice-" + crypto.randomUUID(), "Voice test device");
+    let receivedFormData = false;
+    mockAccessCerts(async (url, init) => {
+      if (!url.endsWith("/audio/transcriptions")) return new Response("unexpected", { status: 404 });
+      receivedFormData = init?.body instanceof FormData;
+      return new Response(JSON.stringify({ text: "hello from test audio" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    const response = await call(device, "/v1/voice/transcribe", {
+      method: "POST",
+      headers: { "content-type": "audio/webm" },
+      body: new Uint8Array([1, 2, 3, 4]),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ text: "hello from test audio" });
+    expect(receivedFormData).toBe(true);
+    const usage = await bindings.DB.prepare(
+      "SELECT reserved_microusd, spent_microusd FROM provider_spend_usage WHERE account_id = ?",
+    ).bind(device.account).first<{ reserved_microusd: number; spent_microusd: number }>();
+    expect(usage?.reserved_microusd).toBe(0);
+    expect(usage?.spent_microusd).toBe(1000);
   });
 });
 

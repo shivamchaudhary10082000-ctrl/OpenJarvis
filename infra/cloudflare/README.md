@@ -20,7 +20,7 @@ See `openapi.yaml` for the draft device, encrypted-memory, task-lease, and chat-
 2. Create a Cloudflare Access application and record its audience tag and team issuer domain.
 3. Decide the account identity source and test account deletion/recovery.
 4. Create D1, R2, and Durable Object resources in a staging environment first.
-5. Apply all ordered migrations (`0001_neo_core.sql` through `0004_api_rate_limits.sql`) to the staging D1 database.
+5. Apply all ordered migrations (`0001_neo_core.sql` through `0005_provider_spend_limits.sql`) to the staging D1 database.
 6. Configure secrets through Wrangler/Cloudflare secret storage. Never commit Access credentials, model provider keys, signing keys, or encryption keys.
 7. Deploy only a health-check build first. Add authenticated routes after JWT verification and device revocation tests pass.
 

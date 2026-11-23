@@ -74,3 +74,12 @@ Do not deploy with real personal data or provider secrets until:
 - No provider API calls or paid inference.
 - No Android hardware enrolment or microphone test.
 - No claim of independent penetration-test completion.
+
+
+## 2026-11-23 implementation addendum — D1 and provider spend controls
+
+The Worker now has a Cloudflare Workers Vitest integration configuration using local SQLite-backed D1 and the repository's ordered migrations. New integration coverage exercises Access JWT signature/issuer/audience/expiry, P-256 device proof, nonce replay, account isolation, revocation, rate limiting, concurrent memory revision allocation, capability-aware task claims, competing task leases, and expired-lease recovery. Provider tests exercise primary failure/backup success, explicit-model no-fallback, monthly cap rejection, and voice transcription upload forwarding.
+
+Migration `0005_provider_spend_limits.sql` adds per-account monthly spend rows, reservation records, and SQLite triggers. Reservations are atomically rejected when reserved plus settled spend would exceed the monthly cap; settlement releases the reservation and records actual or conservative maximum cost. Chat calls require reviewed per-provider input/output rates, are bounded by prompt bytes and output tokens, and reserve the worst-case cost of every candidate that may be attempted. Failed provider attempts are conservatively charged their reservation. Voice calls require a reviewed maximum per-request cost and are charged at that ceiling.
+
+**Fail-closed defaults:** `MAX_MONTHLY_SPEND_USD_MICROS`, model prices, and voice per-request ceilings are set to `0` in the non-test Wrangler configuration. Therefore provider and voice inference remain blocked until the owner chooses a provider/model, verifies current pricing, and explicitly configures a monthly budget and voice cost ceilings. The integration tests and CI have been added but have not yet been executed on the current PR head. This is not a penetration test or staging validation.

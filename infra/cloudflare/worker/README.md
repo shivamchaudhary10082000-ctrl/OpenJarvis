@@ -23,7 +23,7 @@ npm run check
 npm test
 ```
 
-The tests currently cover the unauthenticated health route and rejection of protected requests without an Access token. D1-backed authentication, replay, account isolation, memory revision, task lease and provider failover integration tests are still required before production use. The body-reader unit tests cover the streaming byte ceiling; they do not replace an end-to-end Worker upload test.
+The Vitest suite now runs inside the Cloudflare Workers runtime with a local SQLite-backed D1 database and applies the ordered migrations. It exercises Access JWT signature/issuer/audience/expiry validation, device proof and nonce replay, cross-account isolation, revocation, account rate limits, concurrent memory revisions, capability-aware claims, task lease races/expiry, provider failover, monthly spend reservations, and voice upload forwarding. These tests still require a successful fresh CI run; they are not a substitute for staging or a production security review.
 
 ## Configure staging
 

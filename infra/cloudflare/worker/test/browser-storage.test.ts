@@ -2,6 +2,27 @@ import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NeoDeviceClient } from "../../clients/web/neo-client";
 
+// Node's WebCrypto CryptoKey is not structured-cloneable in every Node runtime,
+// while real browsers support storing CryptoKey in IndexedDB. Preserve CryptoKey
+// references in this fake IndexedDB adapter; plain data still uses structuredClone.
+const nativeStructuredClone = globalThis.structuredClone.bind(globalThis);
+globalThis.structuredClone = ((value: unknown, options?: StructuredSerializeOptions) => {
+  try {
+    return nativeStructuredClone(value, options);
+  } catch (error) {
+    if (!(error instanceof DOMException) || error.name !== "DataCloneError") throw error;
+    const clone = (item: any): any => {
+      if (item && typeof item === "object" && item.constructor?.name === "CryptoKey") return item;
+      if (Array.isArray(item)) return item.map(clone);
+      if (item && Object.getPrototypeOf(item) === Object.prototype) {
+        return Object.fromEntries(Object.entries(item).map(([key, nested]) => [key, clone(nested)]));
+      }
+      return item;
+    };
+    return clone(value);
+  }
+}) as typeof structuredClone;
+
 const account = () => "browser-test-account-" + crypto.randomUUID();
 const token = async () => "test-access-token";
 

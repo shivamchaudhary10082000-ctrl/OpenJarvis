@@ -6,6 +6,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.MessageDigest
 
 data class NeoOfflineItem(
     val id: String,
@@ -21,7 +22,16 @@ data class NeoOfflineItem(
  * payloads whose content fields are already client-encrypted ciphertext.
  * Do not enqueue plaintext conversation or credential material.
  */
-class NeoOfflineStore(context: Context) : SQLiteOpenHelper(context, "neo-offline.db", null, 1) {
+internal fun neoAccountScopeHash(scope: String): String {
+    require(scope.isNotBlank()) { "A stable account scope is required for local device storage" }
+    return MessageDigest.getInstance("SHA-256")
+        .digest(scope.toByteArray(Charsets.UTF_8))
+        .take(12)
+        .joinToString("") { "%02x".format(it) }
+}
+
+class NeoOfflineStore(context: Context, accountScope: String) :
+    SQLiteOpenHelper(context, "neo-offline-${neoAccountScopeHash(accountScope)}.db", null, 1) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE neo_outbox (

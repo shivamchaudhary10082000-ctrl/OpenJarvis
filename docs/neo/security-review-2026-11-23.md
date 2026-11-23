@@ -1,7 +1,7 @@
 # NEO security and integration review
 
 **Review date:** 2026-11-23  
-**Reviewed revision:** `bfc429f77b0756258aa06f92014311db810704df`  
+**Reviewed revision:** `2f4f0db87030704535e993b6a6a9f384182ef5e3`  
 **Scope:** Repository-level review of the initial Cloudflare Worker, D1 schema, memory trust path, and client integration primitives.
 
 This is an engineering review of the checked-in source, not a third-party penetration test, Cloudflare deployment assessment, or production security certification. No live account, provider credential, D1 database, or device was accessed.
@@ -38,6 +38,11 @@ The Worker test suite currently proves only the public health route and rejectio
 
 **Patched in this revision:** Memory creation now allocates `MAX(revision)+1` inside the same `INSERT ... SELECT ... RETURNING` statement, removing the separate read/write race. A D1-backed concurrent-create test and stable conflict handling are still required.
 
+### Medium — Browser device signing key was exportable (patched; browser integration test pending)
+
+The web client previously generated an extractable private P-256 key, exported it to JWK, then re-imported it as non-extractable. The private key therefore existed in exportable form in application memory.
+
+**Patch in this revision:** Generate the key pair as non-extractable and persist the CryptoKey directly in IndexedDB; only the public JWK is exported. Browser storage is still exposed to same-origin script execution, so a production web client needs a strict CSP, dependency/XSS controls, secure Access-token handling, and a documented device recovery/re-enrolment path.
 ### Medium — Provider tier metadata was derived from the candidate array index (patched; CI pending)
 
 The model router previously calculated `tier` and fallback metadata from the loop index. An explicitly selected backup provider became candidate index zero and was incorrectly reported as `primary`.
@@ -48,7 +53,7 @@ The model router previously calculated `tier` and fallback metadata from the loo
 
 The previous cursor used only `(updated_at, memory_id)`. Multiple immutable revisions can share the same second and memory ID, so a page boundary could skip rows. New writes inserted during pagination could also collide with the timestamp-based ordering.
 
-The Worker now uses the D1 implicit `rowid` of the append-only `memory_records` table as its opaque keyset cursor, returning records in insertion order. Cursor encode/decode validation has focused unit tests. This is not yet a D1 integration test; the assumption that memory rows are append-only must remain true. A database rebuild/restore that changes rowids must trigger a full client resynchronisation.
+The Worker now uses the D1 implicit `rowid` of the append-only `memory_records` table as its opaque keyset cursor, returning records in insertion order. D1 BLOB ciphertext and nonce values are converted back to unpadded base64url strings at the API boundary so browser/Android clients receive the declared wire format. Cursor encode/decode validation has focused unit tests. This is not yet a D1 integration test; the assumption that memory rows are append-only must remain true. A database rebuild/restore that changes rowids must trigger a full client resynchronisation.
 
 ## Staging gate
 

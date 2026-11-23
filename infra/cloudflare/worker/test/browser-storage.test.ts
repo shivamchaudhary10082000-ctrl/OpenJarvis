@@ -65,9 +65,9 @@ describe("browser IndexedDB persistence and recovery", () => {
     expect(await isolated.flushOutbox()).toMatchObject({ sent: 0, remaining: 0 });
     expect(await recovered.flushOutbox()).toMatchObject({ sent: 1, remaining: 0, blocked_on: null });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const request = fetchMock.mock.calls[0][0] as Request;
-    expect(request.headers.get("idempotency-key")).toBeTruthy();
-    const body = await request.clone().json() as Record<string, unknown>;
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(new Headers(init.headers).get("idempotency-key")).toBeTruthy();
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
     expect(body).toMatchObject({ payload_ciphertext: "encrypted-content", payload_nonce: "nonce" });
     expect(body).not.toHaveProperty("plaintext");
   });

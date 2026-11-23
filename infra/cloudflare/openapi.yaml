@@ -363,16 +363,26 @@ paths:
                         type: string
       responses:
         "200":
-          description: Generated answer with route disclosure
+          description: OpenAI-compatible response with NEO routing metadata
           content:
             application/json:
               schema:
                 type: object
-                required: [content, route]
+                required: [choices, neo]
                 properties:
-                  content:
-                    type: string
-                  route:
+                  choices:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        message:
+                          type: object
+                          properties:
+                            role:
+                              type: string
+                            content:
+                              type: string
+                  neo:
                     type: object
                     required: [provider, model, tier, fallback_used]
                     properties:
@@ -381,19 +391,79 @@ paths:
                       model:
                         type: string
                       tier:
-                        enum: [primary, backup, offline]
+                        enum: [primary, backup]
                       fallback_used:
                         type: boolean
                       fallback_reason:
                         type: string
                         nullable: true
-                      estimated_cost_usd:
-                        type: number
-                        minimum: 0
+                      latency_ms:
+                        type: integer
+                      account_scope:
+                        const: private
         "429":
-          description: Rate limit or spend cap reached; no weaker model is silently selected.
+          description: Account rate limit reached.
+        "502":
+          description: Configured provider failed.
         "503":
-          description: No eligible model is available under current policy.
+          description: No model provider is configured.
+  /voice/transcribe:
+    post:
+      summary: Transcribe a bounded audio upload using the configured voice provider
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          audio/webm:
+            schema:
+              type: string
+              format: binary
+          audio/wav:
+            schema:
+              type: string
+              format: binary
+          audio/mpeg:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Provider transcription response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "413":
+          description: Audio payload exceeds 15 MB.
+        "429":
+          description: Account rate limit reached.
+  /voice/synthesize:
+    post:
+      summary: Synthesize speech from a provider-compatible JSON request
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Generated audio
+          content:
+            audio/mpeg:
+              schema:
+                type: string
+                format: binary
+        "413":
+          description: Request body exceeds the configured JSON limit.
+        "429":
+          description: Account rate limit reached.
+
 components:
   securitySchemes:
     cloudflareAccess:

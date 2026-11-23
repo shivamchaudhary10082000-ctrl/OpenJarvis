@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import worker, { decodeMemoryCursor, encodeMemoryCursor, modelRouteMetadata, readRequestBodyBounded, isValidCapabilityList } from "../src/index";
+import worker, { decodeMemoryCursor, encodeMemoryCursor, modelRouteMetadata, readRequestBodyBounded, isValidCapabilityList, resolveModelRouting } from "../src/index";
 const env = {} as any;
 describe("NEO Worker unauthenticated surface", () => {
   it("exposes a minimal health response without authentication", async () => {
@@ -98,5 +98,26 @@ describe("device capability validation", () => {
     expect(isValidCapabilityList(Array.from({ length: 33 }, (_, i) => "cap" + i))).toBe(false);
     expect(isValidCapabilityList(["cpu", 42])).toBe(false);
     expect(isValidCapabilityList({ capability: "cpu" })).toBe(false);
+  });
+});
+
+
+describe("model routing policy", () => {
+  it("treats model=auto as automatic routing", () => {
+    expect(resolveModelRouting("auto", true)).toEqual({
+      explicit: false, requestedModel: null, automaticFallback: true,
+    });
+  });
+
+  it("does not silently replace an explicit model", () => {
+    expect(resolveModelRouting("my-model", true)).toEqual({
+      explicit: true, requestedModel: "my-model", automaticFallback: false,
+    });
+  });
+
+  it("honours an explicit no-fallback preference", () => {
+    expect(resolveModelRouting(undefined, false)).toEqual({
+      explicit: false, requestedModel: null, automaticFallback: false,
+    });
   });
 });

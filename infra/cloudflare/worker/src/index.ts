@@ -18,6 +18,12 @@ const json = (data: unknown, status = 200, headers: HeadersInit = {}) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...headers } });
 const fail = (status: number, code: string, message: string) => json({ error: { code, message } }, status);
 const b64u = (s: string) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - s.length % 4) % 4)), c => c.charCodeAt(0));
+export function encodeBytesBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/=/g, "").replace(/\\+/g, "-").replace(/\\//g, "_");
+}
+
 const enc = new TextEncoder();
 const now = () => Math.floor(Date.now() / 1000);
 class RateLimitExceeded extends Error {}
@@ -232,7 +238,12 @@ async function route(req: Request, env: Env): Promise<Response> {
       const rows = await env.DB.prepare("SELECT rowid AS sync_id, memory_id, revision, trust_state, payload_ciphertext, payload_nonce, key_version, source_device_id, source_kind, created_at, updated_at, tombstoned_at FROM memory_records WHERE account_id = ? AND rowid > ? AND trust_state IN ('approved','deleted',?) ORDER BY rowid LIMIT 200").bind(account,cursorRowId,pendingState).all();
       const last = rows.results.length ? rows.results[rows.results.length - 1] as any : null;
       const next = last ? encodeMemoryCursor(Number(last.sync_id)) : null;
-      return json({ records: rows.results, next_cursor: next });
+      const records = rows.results.map((row: any) => ({
+        ...row,
+        payload_ciphertext: encodeBytesBase64Url(new Uint8Array(row.payload_ciphertext)),
+        payload_nonce: encodeBytesBase64Url(new Uint8Array(row.payload_nonce)),
+      }));
+      return json({ records, next_cursor: next });
     }
     if (path === "/memory" && req.method === "POST") {
       const x = await bodyJson<any>(req,env);

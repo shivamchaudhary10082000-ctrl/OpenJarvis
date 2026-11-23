@@ -203,7 +203,7 @@ describe("D1-backed Access and device proof", () => {
   it("accepts a valid device proof once and rejects a replayed nonce", async () => {
     const device = await enrolDevice("proof-" + crypto.randomUUID(), "Proof device");
     const request = await signedRequest(device, "/v1/devices");
-    const replay = request.clone();
+    const replay = new Request(request.url, { method: request.method, headers: request.headers });
     expect((await worker.fetch(request, bindings)).status).toBe(200);
     const replayResponse = await worker.fetch(replay, bindings);
     expect(replayResponse.status).toBe(401);

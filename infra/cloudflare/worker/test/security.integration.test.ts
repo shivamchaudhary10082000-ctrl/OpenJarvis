@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "cloudflare:workers";
 import worker, { cleanupExpiredDeviceNonces, type Env } from "../src/index";
+import { createDeviceIdentity } from "../../clients/web/neo-client";
 
 const encoder = new TextEncoder();
 const bindings = env as unknown as Env;
@@ -287,6 +288,23 @@ describe("D1-backed Access and device proof", () => {
     }
     const limited = await call(device, "/v1/devices");
     expect(limited.status).toBe(429);
+  });
+});
+
+describe("Browser device identity key safety", () => {
+  it("persists only a non-exportable P-256 private CryptoKey while retaining an exportable public JWK", async () => {
+    const identity = await createDeviceIdentity();
+    expect(identity.privateKey.type).toBe("private");
+    expect(identity.privateKey.extractable).toBe(false);
+    expect(identity.publicJwk.kty).toBe("EC");
+    expect(identity.publicJwk.crv).toBe("P-256");
+
+    const verifyKey = await crypto.subtle.importKey(
+      "jwk", identity.publicJwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"],
+    );
+    const message = new TextEncoder().encode("NEO browser device key proof");
+    const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, identity.privateKey, message);
+    expect(await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, verifyKey, signature, message)).toBe(true);
   });
 });
 

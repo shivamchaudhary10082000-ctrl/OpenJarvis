@@ -160,6 +160,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "4XX":
+          description: Client request rejected.
         "200":
           description: Encrypted memory changes
           content:

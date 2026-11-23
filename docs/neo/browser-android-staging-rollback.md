@@ -98,3 +98,10 @@ No Cloudflare deployment, remote migration, export, rollback or resource deletio
 - Disposable staging migration, Access, smoke, rollback and restore rehearsal recorded.
 - Independent security assessment completed.
 - Keep provider and voice budgets at zero until provider/model, pricing and spend limits are explicitly approved.
+
+
+## Added automated native-client harnesses (2026-11-24; CI pending)
+
+- Android harness: `infra/cloudflare/clients/android-test-harness`. Unit tests cover SQLite outbox persistence across store reconstruction, account-scoped database isolation and plaintext/invalid-idempotency rejection. An emulator instrumentation test covers Android Keystore P-256 identity persistence and signing across client instances.
+- Browser harness: `infra/cloudflare/worker/test/native-browser`. Playwright runs the real IndexedDB client in Chromium, Firefox and WebKit, including non-exportable CryptoKey persistence, encrypted memory cache recovery and idempotent outbox replay after reload.
+- CI workflows are configured for both harnesses. Their status must be checked on the latest PR head before claiming success. The emulator is not a substitute for real Pixel/Samsung device testing.

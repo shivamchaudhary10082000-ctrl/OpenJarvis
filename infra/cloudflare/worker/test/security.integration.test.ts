@@ -344,6 +344,66 @@ describe("D1-backed provider budgets, failover, and voice", () => {
     expect(primaryCalls).toBe(2);
   });
 
+  it("honours allow_fallback=false and never contacts the backup provider", async () => {
+    const device = await enrolDevice("provider-no-fallback-" + crypto.randomUUID(), "No-fallback device");
+    let backupCalls = 0;
+    mockAccessCerts(async (url) => {
+      if (url.startsWith("https://primary.provider.test/")) return new Response("unavailable", { status: 503 });
+      if (url.startsWith("https://backup.provider.test/")) backupCalls++;
+      return new Response(JSON.stringify({ choices: [] }), { status: 200 });
+    });
+    const response = await call(device, "/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "auto", allow_fallback: false, messages: [{ role: "user", content: "Do not fallback" }] }),
+    });
+    expect(response.status).toBe(502);
+    expect(backupCalls).toBe(0);
+  });
+
+  it("charges a bounded reservation when a provider connection fails", async () => {
+    const device = await enrolDevice("provider-network-error-" + crypto.randomUUID(), "Provider network error device");
+    mockAccessCerts(async () => { throw new Error("simulated provider network timeout"); });
+    const response = await call(device, "/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "primary-model", messages: [{ role: "user", content: "timeout" }] }),
+    });
+    expect(response.status).toBe(502);
+    const usage = await bindings.DB.prepare(
+      "SELECT reserved_microusd, spent_microusd FROM provider_spend_usage WHERE account_id = ?",
+    ).bind(device.account).first<{ reserved_microusd: number; spent_microusd: number }>();
+    expect(usage?.reserved_microusd).toBe(0);
+    expect(usage?.spent_microusd).toBeGreaterThan(0);
+  });
+
+  it("proxies speech synthesis and charges its configured maximum request cost", async () => {
+    const device = await enrolDevice("voice-synthesis-" + crypto.randomUUID(), "Voice synthesis device");
+    let receivedJson = false;
+    mockAccessCerts(async (url, init) => {
+      if (!url.endsWith("/audio/speech")) return new Response("unexpected", { status: 404 });
+      receivedJson = init?.headers !== undefined && (init.headers as Record<string, string>)["content-type"] === "application/json";
+      return new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: { "content-type": "audio/mpeg" },
+      });
+    });
+    const response = await call(device, "/v1/voice/synthesize", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "tts-1", input: "hello", voice: "alloy" }),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("audio/mpeg");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+    expect(receivedJson).toBe(true);
+    const usage = await bindings.DB.prepare(
+      "SELECT reserved_microusd, spent_microusd FROM provider_spend_usage WHERE account_id = ?",
+    ).bind(device.account).first<{ reserved_microusd: number; spent_microusd: number }>();
+    expect(usage?.reserved_microusd).toBe(0);
+    expect(usage?.spent_microusd).toBe(1000);
+  });
+
   it("proxies transcription audio and records the configured maximum request cost", async () => {
     const device = await enrolDevice("voice-" + crypto.randomUUID(), "Voice test device");
     let receivedFormData = false;

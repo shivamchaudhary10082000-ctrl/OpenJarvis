@@ -19,6 +19,37 @@ const fail = (status: number, code: string, message: string) => json({ error: { 
 const b64u = (s: string) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - s.length % 4) % 4)), c => c.charCodeAt(0));
 const enc = new TextEncoder();
 const now = () => Math.floor(Date.now() / 1000);
+function urlPathBodyLimit(req: Request, env: Env): number {
+  const path = new URL(req.url).pathname.replace(/^\\/v1/, "");
+  return path.startsWith("/voice/") ? 15_000_000 : Number(env.MAX_BODY_BYTES || 1_000_000);
+}
+async function readRequestBodyBounded(req: Request, maxBytes: number): Promise<Uint8Array> {
+  const declared = req.headers.get("content-length");
+  if (declared && Number(declared) > maxBytes) throw new Error("Request body too large");
+  if (!req.body) return new Uint8Array();
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel("Request body too large");
+        throw new Error("Request body too large");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
+  return body;
+}
+
 
 // D1's implicit rowid is an insertion sequence for this append-only revision
 // log. It prevents same-second writes/revisions from being skipped by cursors.
@@ -76,7 +107,8 @@ async function authenticate(req: Request, env: Env): Promise<{ account: string; 
     const nonce = req.headers.get("x-neo-nonce") || "";
     const signature = req.headers.get("x-neo-signature") || "";
     if (!Number.isInteger(ts) || Math.abs(now() - ts) > 300 || !/^[A-Za-z0-9_-]{16,96}$/.test(nonce) || !signature) throw new Error("Missing or expired device proof");
-    const body = await req.clone().arrayBuffer();
+    const bodyLimit = urlPathBodyLimit(req, env);
+    const body = await readRequestBodyBounded(req.clone(), bodyLimit);
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", body));
     const bodyHash = Array.from(digest, b => b.toString(16).padStart(2, "0")).join("");
     const requestUrl = new URL(req.url);
@@ -171,10 +203,13 @@ async function route(req: Request, env: Env): Promise<Response> {
     if (path === "/memory" && req.method === "POST") {
       const x = await bodyJson<any>(req,env);
       if (!validCipher(x) || typeof x.memory_id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(x.memory_id)) return fail(400,"invalid_memory","Invalid encrypted memory payload");
-      const rev = await env.DB.prepare("SELECT COALESCE(MAX(revision),0)+1 AS revision FROM memory_records WHERE account_id=? AND memory_id=?").bind(account,x.memory_id).first<{revision:number}>();
       const t=now();
-      await env.DB.prepare("INSERT INTO memory_records(memory_id,revision,account_id,trust_state,payload_ciphertext,payload_nonce,key_version,source_device_id,source_kind,created_at,updated_at) VALUES(?,?,?,'pending',?,?,?,?,?,?,?)").bind(x.memory_id,rev?.revision || 1,account,b64u(x.payload_ciphertext),b64u(x.payload_nonce),x.key_version,device.device_id,String(x.source_kind || "user").slice(0,40),t,t).run();
-      return json({memory_id:x.memory_id,revision:rev?.revision || 1,trust_state:"pending",created_at:t},201);
+      const inserted=await env.DB.prepare("INSERT INTO memory_records(memory_id,revision,account_id,trust_state,payload_ciphertext,payload_nonce,key_version,source_device_id,source_kind,created_at,updated_at) SELECT ?, COALESCE(MAX(revision),0)+1, ?, 'pending', ?, ?, ?, ?, ?, ?, ? FROM memory_records WHERE account_id=? AND memory_id=? RETURNING revision")
+        .bind(x.memory_id,account,b64u(x.payload_ciphertext),b64u(x.payload_nonce),x.key_version,device.device_id,String(x.source_kind || "user").slice(0,40),t,t,account,x.memory_id).first<{revision:number}>();
+      const first=inserted || await env.DB.prepare("INSERT INTO memory_records(memory_id,revision,account_id,trust_state,payload_ciphertext,payload_nonce,key_version,source_device_id,source_kind,created_at,updated_at) VALUES(?,1,?,'pending',?,?,?,?,?,?,?) RETURNING revision")
+        .bind(x.memory_id,account,b64u(x.payload_ciphertext),b64u(x.payload_nonce),x.key_version,device.device_id,String(x.source_kind || "user").slice(0,40),t,t).first<{revision:number}>();
+      if (!first) return fail(409,"revision_conflict","Memory revision could not be allocated; retry the request");
+      return json({memory_id:x.memory_id,revision:first.revision,trust_state:"pending",created_at:t},201);
     }
     const approve = path.match(/^\/memory\/([A-Za-z0-9_-]{1,128})\/approve$/);
     if (approve && req.method === "POST") {
@@ -290,8 +325,9 @@ async function voiceRoute(req:Request,env:Env,mode:"transcribe"|"synthesize"):Pr
   const url=mode==="transcribe"?env.MODEL_PRIMARY_URL:env.MODEL_PRIMARY_URL;
   const key=env.MODEL_PRIMARY_API_KEY;
   if(!url||!key)return fail(503,"voice_unconfigured","Voice provider is not configured");
-  const data=await req.arrayBuffer();
-  if(data.byteLength>15_000_000)return fail(413,"body_too_large","Voice payload exceeds 15 MB");
+  let data: Uint8Array;
+  try { data=await readRequestBodyBounded(req,15_000_000); }
+  catch { return fail(413,"body_too_large","Voice payload exceeds 15 MB"); }
   const endpoint=mode==="transcribe"?"/audio/transcriptions":"/audio/speech";
   let body:BodyInit=data;
   const headers:Record<string,string>={"authorization":"Bearer "+key};
@@ -299,7 +335,7 @@ async function voiceRoute(req:Request,env:Env,mode:"transcribe"|"synthesize"):Pr
     const form=new FormData();
     const contentType=req.headers.get("content-type")||"audio/webm";
     const extension=contentType.includes("wav")?"wav":contentType.includes("mpeg")?"mp3":"webm";
-    form.append("file",new Blob([data],{type:contentType}),"neo-audio."+extension);
+    form.append("file",new Blob([data as BlobPart],{type:contentType}),"neo-audio."+extension);
     form.append("model","whisper-1");
     body=form;
   } else {

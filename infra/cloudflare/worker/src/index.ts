@@ -40,11 +40,11 @@ function jsonBodyLimit(env: Env): number {
   const configured = Number(env.MAX_BODY_BYTES || 1_000_000);
   return Number.isSafeInteger(configured) && configured > 0 ? Math.min(configured, 5_000_000) : 1_000_000;
 }
-function urlPathBodyLimit(req: Request, env: Env): number {
+function urlPathBodyLimit(req: { url: string }, env: Env): number {
   const path = new URL(req.url).pathname.replace(/^\/v1/, "");
   return path.startsWith("/voice/") ? 15_000_000 : jsonBodyLimit(env);
 }
-export async function readRequestBodyBounded(req: Request, maxBytes: number): Promise<Uint8Array> {
+export async function readRequestBodyBounded(req: { headers: Headers; body: ReadableStream<Uint8Array> | null }, maxBytes: number): Promise<Uint8Array> {
   const declared = req.headers.get("content-length");
   if (declared && Number(declared) > maxBytes) throw new Error("Request body too large");
   if (!req.body) return new Uint8Array();
@@ -136,7 +136,8 @@ async function authenticate(req: Request, env: Env): Promise<{ account: string; 
     const canonical = [req.method.toUpperCase(), requestUrl.host, requestUrl.pathname + requestUrl.search, ts, nonce, bodyHash].join("\n");
     const jwk = JSON.parse(row.public_key_jwk) as JsonWebKey;
     const key = await crypto.subtle.importKey("jwk", jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
-    if (!await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, b64u(signature), enc.encode(canonical))) throw new Error("Invalid device signature");
+    const signatureBytes = new Uint8Array(b64u(signature));
+    if (!await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, signatureBytes.buffer, enc.encode(canonical))) throw new Error("Invalid device signature");
     try {
       await env.DB.prepare("INSERT INTO device_nonces(device_id, nonce, expires_at) VALUES(?, ?, ?)").bind(deviceId, nonce, ts + 600).run();
     } catch { throw new Error("Replayed device request"); }
@@ -396,13 +397,15 @@ async function voiceRoute(req:Request,env:Env,mode:"transcribe"|"synthesize"):Pr
   try { data=await readRequestBodyBounded(req,15_000_000); }
   catch { return fail(413,"body_too_large","Voice payload exceeds 15 MB"); }
   const endpoint=mode==="transcribe"?"/audio/transcriptions":"/audio/speech";
-  let body:BodyInit=data;
+  const bodyBytes = new Uint8Array(data.byteLength);
+  bodyBytes.set(data);
+  let body:BodyInit=bodyBytes.buffer;
   const headers:Record<string,string>={"authorization":"Bearer "+key};
   if(mode==="transcribe"){
     const form=new FormData();
     const contentType=req.headers.get("content-type")||"audio/webm";
     const extension=contentType.includes("wav")?"wav":contentType.includes("mpeg")?"mp3":"webm";
-    form.append("file",new Blob([data as BlobPart],{type:contentType}),"neo-audio."+extension);
+    form.append("file",new Blob([bodyBytes],{type:contentType}),"neo-audio."+extension);
     form.append("model","whisper-1");
     body=form;
   } else {

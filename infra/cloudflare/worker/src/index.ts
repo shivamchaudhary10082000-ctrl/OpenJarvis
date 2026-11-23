@@ -243,7 +243,7 @@ async function route(req: Request, env: Env): Promise<Response> {
       const first=inserted || await env.DB.prepare("INSERT INTO memory_records(memory_id,revision,account_id,trust_state,payload_ciphertext,payload_nonce,key_version,source_device_id,source_kind,created_at,updated_at) VALUES(?,1,?,'pending',?,?,?,?,?,?,?) RETURNING revision")
         .bind(x.memory_id,account,b64u(x.payload_ciphertext),b64u(x.payload_nonce),x.key_version,device.device_id,String(x.source_kind || "user").slice(0,40),t,t).first<{revision:number}>();
       if (!first) return fail(409,"revision_conflict","Memory revision could not be allocated; retry the request");
-      return json({memory_id:x.memory_id,revision:first.revision,trust_state:"pending",created_at:t},201);
+      return json({memory_id:x.memory_id,revision:first.revision,trust_state:"pending",created_at:t,updated_at:t},201);
     }
     const approve = path.match(/^\/memory\/([A-Za-z0-9_-]{1,128})\/approve$/);
     if (approve && req.method === "POST") {
@@ -253,7 +253,7 @@ async function route(req: Request, env: Env): Promise<Response> {
       const r=await env.DB.prepare("INSERT INTO memory_records(memory_id,revision,account_id,trust_state,payload_ciphertext,payload_nonce,key_version,source_device_id,source_kind,created_at,updated_at) SELECT memory_id, revision+1, account_id, 'approved', payload_ciphertext, payload_nonce, key_version, source_device_id, source_kind, created_at, ? FROM memory_records WHERE account_id=? AND memory_id=? AND revision=? AND trust_state='pending' AND NOT EXISTS (SELECT 1 FROM memory_records newer WHERE newer.account_id=? AND newer.memory_id=? AND newer.revision=?)").bind(t,account,approve[1],expected,account,approve[1],expected+1).run();
       if (!r.meta.changes) return fail(409,"revision_conflict","Memory is not pending at the expected revision");
       await env.DB.prepare("INSERT INTO audit_events(event_id,account_id,device_id,event_type,event_metadata_json,created_at) VALUES(?,?,?,?,?,?)").bind(id(),account,device.device_id,"memory.approved",JSON.stringify({memory_id:approve[1],revision:expected+1}),t).run();
-      return json({memory_id:approve[1],revision:expected+1,trust_state:"approved"});
+      return json({memory_id:approve[1],revision:expected+1,trust_state:"approved",updated_at:t});
     }
     const remove = path.match(/^\/memory\/([A-Za-z0-9_-]{1,128})$/);
     if (remove && req.method === "DELETE") {
@@ -317,6 +317,15 @@ async function route(req: Request, env: Env): Promise<Response> {
     return fail(400,"bad_request",message);
   }
 }
+export function resolveModelRouting(model: unknown, allowFallback: unknown) {
+  const requested = typeof model === "string" ? model.trim() : "";
+  const explicit = requested.length > 0 && requested.toLowerCase() !== "auto";
+  return {
+    explicit,
+    requestedModel: explicit ? requested : null,
+    automaticFallback: !explicit && allowFallback !== false,
+  };
+}
 export function modelRouteMetadata(
   providerName: string,
   primaryName: string,
@@ -339,13 +348,16 @@ export function modelRouteMetadata(
 async function modelRoute(req:Request,env:Env,account:string):Promise<Response>{
   const x=await bodyJson<any>(req,env);
   if (!Array.isArray(x.messages) || x.messages.length<1 || x.messages.length>100) return fail(400,"invalid_messages","messages must contain 1–100 entries");
-  const explicit=typeof x.model==="string" && x.model.length>0;
+  const routing=resolveModelRouting(x.model,x.allow_fallback);
   const primary={url:env.MODEL_PRIMARY_URL,name:env.MODEL_PRIMARY_NAME||"primary",key:env.MODEL_PRIMARY_API_KEY};
   const backup={url:env.MODEL_BACKUP_URL,name:env.MODEL_BACKUP_NAME||"backup",key:env.MODEL_BACKUP_API_KEY};
   const choices=[primary,backup].filter(p=>p.url&&p.key);
   if (!choices.length) return fail(503,"model_unconfigured","No model provider is configured");
-  if (explicit && !choices.some(p=>p.name===x.model)) return fail(400,"model_unavailable","Explicitly requested model is not configured; no fallback was attempted");
-  const candidates=explicit?choices.filter(p=>p.name===x.model):choices;
+  if (routing.explicit && !choices.some(p=>p.name===routing.requestedModel)) return fail(400,"model_unavailable","Explicitly requested model is not configured; no fallback was attempted");
+  const candidates=routing.explicit
+    ? choices.filter(p=>p.name===routing.requestedModel)
+    : routing.automaticFallback ? choices : choices.filter(p=>p.name===primary.name);
+  if (!candidates.length) return fail(503,"model_unconfigured","No primary model is configured and automatic fallback is disabled");
   let lastError="provider_unavailable";
   for(let i=0;i<candidates.length;i++){
     const p=candidates[i];
@@ -354,8 +366,8 @@ async function modelRoute(req:Request,env:Env,account:string):Promise<Response>{
       const response=await fetch(p.url!.replace(/\/$/,"")+"/chat/completions",{method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+p.key!},body:JSON.stringify({...x,model:p.name,stream:false}),signal:AbortSignal.timeout(60_000)});
       if(!response.ok){lastError="provider_http_"+response.status;if((response.status<500&&response.status!==429)||i===candidates.length-1) return fail(502,"provider_error",lastError);continue;}
       const payload=await response.json() as Record<string, unknown>;
-      return json({ ...payload, neo:{provider:p.name,model:p.name,...modelRouteMetadata(p.name,primary.name,!explicit,Boolean(primary.url&&primary.key),lastError,Date.now()-started)}});
-    }catch(e){lastError=e instanceof Error?e.name:"provider_network_error";if(explicit||i===candidates.length-1)return fail(502,"provider_error",lastError);}
+      return json({ ...payload, neo:{provider:p.name,model:p.name,...modelRouteMetadata(p.name,primary.name,routing.automaticFallback,Boolean(primary.url&&primary.key),lastError,Date.now()-started)}});
+    }catch(e){lastError=e instanceof Error?e.name:"provider_network_error";if(routing.explicit||i===candidates.length-1)return fail(502,"provider_error",lastError);}
   }
   return fail(502,"provider_error",lastError);
 }

@@ -2,6 +2,9 @@ openapi: 3.1.0
 info:
   title: NEO Cloud API
   version: 0.1.0
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
   description: >
     Implemented v0 contract for the cloud-first NEO gateway. All payloads containing
     memory or task content are client-encrypted. This contract describes the
@@ -16,6 +19,7 @@ security:
 paths:
   /health:
     get:
+      operationId: healthCheck
       security: []
       summary: Liveness check
       responses:
@@ -31,6 +35,7 @@ paths:
                     const: ok
   /devices:
     get:
+      operationId: listDevices
       summary: List devices registered to the authenticated account
       parameters:
         - $ref: "#/components/parameters/DeviceId"
@@ -48,6 +53,7 @@ paths:
                     items:
                       $ref: "#/components/schemas/Device"
     post:
+      operationId: enrolDevice
       summary: Enrol a device public key
       parameters:
         - $ref: "#/components/parameters/DeviceId"
@@ -83,6 +89,7 @@ paths:
           $ref: "#/components/responses/Conflict"
   /devices/heartbeat:
     post:
+      operationId: heartbeatDevice
       summary: Refresh the authenticated device's online presence
       responses:
         "200":
@@ -103,6 +110,7 @@ paths:
                     type: integer
   /devices/{deviceId}:
     delete:
+      operationId: revokeDevice
       summary: Revoke a device immediately
       parameters:
         - $ref: "#/components/parameters/DeviceId"
@@ -118,6 +126,7 @@ paths:
           $ref: "#/components/responses/NotFound"
   /memory:
     get:
+      operationId: syncMemory
       summary: Synchronise memory records
       description: Returns encrypted records; approved records are the default recall set.
       parameters:
@@ -148,6 +157,7 @@ paths:
                   next_cursor:
                     type: [string, "null"]
     post:
+      operationId: createMemory
       summary: Create a pending memory candidate
       parameters:
         - $ref: "#/components/parameters/DeviceId"
@@ -176,6 +186,7 @@ paths:
           $ref: "#/components/responses/Conflict"
   /memory/{memoryId}/approve:
     post:
+      operationId: approveMemory
       summary: Explicitly approve a pending memory candidate
       parameters:
         - $ref: "#/components/parameters/DeviceId"
@@ -201,6 +212,7 @@ paths:
           $ref: "#/components/responses/Conflict"
   /memory/{memoryId}:
     delete:
+      operationId: tombstoneMemory
       summary: Tombstone a memory record across all devices
       parameters:
         - $ref: "#/components/parameters/DeviceId"
@@ -221,6 +233,7 @@ paths:
           $ref: "#/components/responses/Conflict"
   /tasks:
     post:
+      operationId: enqueueTask
       summary: Queue encrypted work for an authorised account device
       parameters:
         - $ref: "#/components/parameters/DeviceId"
@@ -270,6 +283,7 @@ paths:
           description: Account rate limit reached.
   /tasks/claim:
     post:
+      operationId: claimTask
       summary: Claim the oldest queued task supported by this device
       parameters:
         - $ref: "#/components/parameters/DeviceId"
@@ -318,6 +332,7 @@ paths:
           description: Account rate limit reached.
   /tasks/{taskId}:
     get:
+      operationId: getTaskState
       summary: Get task state for the authenticated account
       parameters:
         - $ref: "#/components/parameters/DeviceId"
@@ -336,6 +351,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
     patch:
+      operationId: updateTaskState
       summary: Update a task state held by the calling device
       parameters:
         - $ref: "#/components/parameters/DeviceId"
@@ -361,6 +377,7 @@ paths:
           $ref: "#/components/responses/Conflict"
   /chat/completions:
     post:
+      operationId: createChatCompletion
       summary: Generate a response using the server-side model router
       parameters:
         - $ref: "#/components/parameters/DeviceId"
@@ -443,6 +460,7 @@ paths:
           description: No model provider is configured.
   /voice/transcribe:
     post:
+      operationId: transcribeVoice
       summary: Transcribe a bounded audio upload using the configured voice provider
       parameters:
         - $ref: "#/components/parameters/DeviceId"
@@ -475,6 +493,7 @@ paths:
           description: Account rate limit reached.
   /voice/synthesize:
     post:
+      operationId: synthesizeVoice
       summary: Synthesize speech from a provider-compatible JSON request
       parameters:
         - $ref: "#/components/parameters/DeviceId"

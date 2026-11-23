@@ -23,7 +23,7 @@ function urlPathBodyLimit(req: Request, env: Env): number {
   const path = new URL(req.url).pathname.replace(/^\\/v1/, "");
   return path.startsWith("/voice/") ? 15_000_000 : Number(env.MAX_BODY_BYTES || 1_000_000);
 }
-async function readRequestBodyBounded(req: Request, maxBytes: number): Promise<Uint8Array> {
+export async function readRequestBodyBounded(req: Request, maxBytes: number): Promise<Uint8Array> {
   const declared = req.headers.get("content-length");
   if (declared && Number(declared) > maxBytes) throw new Error("Request body too large");
   if (!req.body) return new Uint8Array();
@@ -127,8 +127,7 @@ async function bodyJson<T>(req: Request, env: Env): Promise<T> {
   const max = Number(env.MAX_BODY_BYTES || 1_000_000);
   const declaredLength = Number(req.headers.get("content-length") || 0);
   if (declaredLength > max) throw new Error("Request body too large");
-  const raw = await req.arrayBuffer();
-  if (raw.byteLength > max) throw new Error("Request body too large");
+  const raw = await readRequestBodyBounded(req, max);
   return JSON.parse(new TextDecoder().decode(raw)) as T;
 }
 function validCipher(x: any): boolean {

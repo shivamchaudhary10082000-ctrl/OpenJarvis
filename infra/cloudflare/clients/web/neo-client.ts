@@ -32,11 +32,10 @@ export class NeoDeviceClient {
   static async create(baseUrl:string,accessToken:()=>Promise<string>){
     let identity=await loadIdentity();
     if(!identity){
-      const pair=await crypto.subtle.generateKey({name:"ECDSA",namedCurve:"P-256"},true,["sign","verify"]);
+      const pair=await crypto.subtle.generateKey({name:"ECDSA",namedCurve:"P-256"},false,["sign","verify"]);
       const publicJwk=await crypto.subtle.exportKey("jwk",pair.publicKey);
-      const privateJwk=await crypto.subtle.exportKey("jwk",pair.privateKey);
-      const privateKey=await crypto.subtle.importKey("jwk",privateJwk,{name:"ECDSA",namedCurve:"P-256"},false,["sign"]);
-      identity={deviceId:randomId(),privateKey,publicJwk};
+      // Persist the non-exportable CryptoKey directly in IndexedDB; never export private key material.
+      identity={deviceId:randomId(),privateKey:pair.privateKey,publicJwk};
       await saveIdentity(identity);
     }
     return new NeoDeviceClient(baseUrl.endsWith("/") ? baseUrl.slice(0,-1) : baseUrl,accessToken,identity);

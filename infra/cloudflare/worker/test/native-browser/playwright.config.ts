@@ -16,6 +16,7 @@ export default defineConfig({
   ],
   webServer: {
     command: "npx vite --config test/native-browser/vite.config.ts --host 127.0.0.1 --port 4173",
+    cwd: path.resolve(here, "../.."),
     url: "http://127.0.0.1:4173",
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,

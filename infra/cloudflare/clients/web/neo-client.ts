@@ -169,7 +169,7 @@ export class NeoDeviceClient {
     if(payload.next_cursor)await saveCursor(payload.next_cursor,this.scopeKey);
     return {...payload,offline:false};
   }
-  async getCachedMemory(includePending=false){return readCachedMemory(includePending,this.deviceId);}
+  async getCachedMemory(includePending=false){return readCachedMemory(includePending,this.scopeKey);}
   async createMemory(input:{memory_id:string;payload_ciphertext:string;payload_nonce:string;key_version:number;source_kind?:string}){
     const key=randomId(),body=JSON.stringify({memory_id:input.memory_id,payload_ciphertext:input.payload_ciphertext,payload_nonce:input.payload_nonce,key_version:input.key_version,...(input.source_kind===undefined?{}:{source_kind:input.source_kind})});
     let response:Response;

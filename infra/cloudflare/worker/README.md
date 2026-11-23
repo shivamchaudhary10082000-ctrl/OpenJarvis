@@ -9,7 +9,8 @@ This directory contains the first executable NEO API gateway implementation. It 
 - Signed device requests with a five-minute timestamp window and one-use nonce replay protection.
 - Device listing, online freshness indicator, and revocation.
 - Client-encrypted memory create, incremental sync cursor, explicit approval into a new immutable revision, and deletion tombstones.
-- Encrypted task enqueue, idempotency, device claiming, expiring leases, retry after lease expiry, and task status.
+- Encrypted task enqueue, idempotency, capability-aware device claiming, expiring leases, retry after lease expiry, and task status.
+- Streaming request-body limits: JSON payloads are bounded by `MAX_BODY_BYTES` (default 1 MB); voice payloads are bounded at 15 MB before complete buffering.
 - OpenAI-compatible primary/backup chat routing with explicit provider/model/tier/fallback metadata. Explicit model requests never silently fall back.
 - Authenticated transcription and speech synthesis proxy routes.
 
@@ -21,14 +22,14 @@ npm run check
 npm test
 ```
 
-The tests currently cover the unauthenticated health route and rejection of protected requests without an Access token. D1-backed authentication, replay, account isolation, memory revision, task lease and provider failover integration tests are still required before production use.
+The tests currently cover the unauthenticated health route and rejection of protected requests without an Access token. D1-backed authentication, replay, account isolation, memory revision, task lease and provider failover integration tests are still required before production use. The body-reader unit tests cover the streaming byte ceiling; they do not replace an end-to-end Worker upload test.
 
 ## Configure staging
 
 1. Create a Cloudflare Access application and set its issuer domain and audience in `wrangler.toml`.
 2. Create a D1 database and replace the placeholder database ID.
 3. Apply migrations in order:
-   `wrangler d1 migrations apply neo-staging --remote`.
+   `wrangler d1 migrations apply neo-staging --remote` (including migration `0003_task_capabilities.sql`).
 4. Set provider credentials using `wrangler secret put MODEL_PRIMARY_API_KEY` and, if approved, `MODEL_BACKUP_API_KEY`.
 5. Configure provider base URLs and model IDs in Worker vars. Use independent providers for meaningful backup resilience.
 6. Run `wrangler dev`, test with a dedicated staging Access account, and only then deploy to staging.

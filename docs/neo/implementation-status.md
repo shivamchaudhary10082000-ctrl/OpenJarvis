@@ -29,8 +29,8 @@ This report separates source implementation from tested behavior and from produc
 ## Verification evidence
 
 Latest NEO Worker run:
-- Workflow run #105: **Success**
-- Tested commit: `e85546f46b69f524c35acce84ce22ee58fae54a2`
+- Workflow run #106: **Success**
+- Tested commit: `9e2d2fd4783cfc77c3cdc3cea9e3eed664e71922`
 - npm install: passed.
 - Redocly OpenAPI lint: passed.
 - TypeScript check: passed.
@@ -71,7 +71,7 @@ Input-token reservation uses serialized request bytes as a conservative upper bo
 7. **Native app integration:** Android code is a transport/storage primitive, not a built application. No Gradle app/test project, Access login UI, microphone permission UX, background worker or real-device test exists. iOS and desktop integrations are absent.
 8. **Storage/coordination expansion:** R2 encrypted attachments/exports/snapshots and Durable Object coordination are not implemented or provisioned.
 9. **Independent security review:** Source-level checks are not a third-party penetration test or security certification.
-10. **Language quality gate:** Run the Hindi/Hinglish evaluation set across candidate models, blind-score outputs, and select no primary model until quality and cost gates pass.
+11. **Desktop Rust dependency audit:** Current CI fails on `cookie 0.18.1` in `frontend/src-tauri/Cargo.lock` (RUSTSEC-2026-0594). The advisory documents a specific fork/thread condition; applicability to the Tauri process model needs review, but dependency upgrade to patched `cookie 0.18.3` and full re-verification are required. Do not ignore/suppress without documented justification.\n10. **Language quality gate:** Run the Hindi/Hinglish evaluation set across candidate models, blind-score outputs, and select no primary model until quality and cost gates pass.
 
 ## Release decision
 

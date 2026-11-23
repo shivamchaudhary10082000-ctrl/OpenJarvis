@@ -19,6 +19,21 @@ const fail = (status: number, code: string, message: string) => json({ error: { 
 const b64u = (s: string) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - s.length % 4) % 4)), c => c.charCodeAt(0));
 const enc = new TextEncoder();
 const now = () => Math.floor(Date.now() / 1000);
+
+// D1's implicit rowid is an insertion sequence for this append-only revision
+// log. It prevents same-second writes/revisions from being skipped by cursors.
+export function encodeMemoryCursor(rowId: number): string {
+  if (!Number.isSafeInteger(rowId) || rowId < 0) throw new Error("Invalid memory cursor row id");
+  return btoa(JSON.stringify({ n: rowId })).replace(/=/g, "").replace(/\\+/g, "-").replace(/\\//g, "_");
+}
+export function decodeMemoryCursor(token: string): number | null {
+  try {
+    const parsed = JSON.parse(new TextDecoder().decode(b64u(token))) as { n?: number };
+    return Number.isSafeInteger(parsed.n) && Number(parsed.n) >= 0 ? Number(parsed.n) : null;
+  } catch {
+    return null;
+  }
+}
 const id = () => crypto.randomUUID();
 const safeEqual = (a: string, b: string) => {
   if (a.length !== b.length) return false;
@@ -143,20 +158,14 @@ async function route(req: Request, env: Env): Promise<Response> {
       return new Response(null,{status:204});
     }
     if (path === "/memory" && req.method === "GET") {
-      let cursorTime = 0, cursorId = "";
       const token = url.searchParams.get("cursor");
-      if (token) {
-        try {
-          const parsed = JSON.parse(new TextDecoder().decode(b64u(token))) as { t:number; id:string };
-          if (!Number.isInteger(parsed.t) || typeof parsed.id !== "string") throw new Error("invalid cursor");
-          cursorTime = parsed.t; cursorId = parsed.id;
-        } catch { return fail(400, "invalid_cursor", "Invalid memory sync cursor"); }
-      }
+      const cursorRowId = token ? decodeMemoryCursor(token) : 0;
+      if (cursorRowId === null) return fail(400, "invalid_cursor", "Invalid memory sync cursor");
       const includePending = url.searchParams.get("include_pending") === "true";
       const pendingState = includePending ? "pending" : "approved";
-      const rows = await env.DB.prepare("SELECT memory_id, revision, trust_state, payload_ciphertext, payload_nonce, key_version, source_device_id, source_kind, created_at, updated_at, tombstoned_at FROM memory_records WHERE account_id = ? AND (updated_at > ? OR (updated_at = ? AND memory_id > ?)) AND trust_state IN ('approved','deleted',?) ORDER BY updated_at, memory_id LIMIT 200").bind(account,cursorTime,cursorTime,cursorId,pendingState).all();
+      const rows = await env.DB.prepare("SELECT rowid AS sync_id, memory_id, revision, trust_state, payload_ciphertext, payload_nonce, key_version, source_device_id, source_kind, created_at, updated_at, tombstoned_at FROM memory_records WHERE account_id = ? AND rowid > ? AND trust_state IN ('approved','deleted',?) ORDER BY rowid LIMIT 200").bind(account,cursorRowId,pendingState).all();
       const last = rows.results.length ? rows.results[rows.results.length - 1] as any : null;
-      const next = last ? btoa(JSON.stringify({t:Number(last.updated_at),id:String(last.memory_id)})).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_") : null;
+      const next = last ? encodeMemoryCursor(Number(last.sync_id)) : null;
       return json({ records: rows.results, next_cursor: next });
     }
     if (path === "/memory" && req.method === "POST") {

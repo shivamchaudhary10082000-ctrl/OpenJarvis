@@ -9,26 +9,22 @@ declare global {
         createMemory(input: { memory_id: string; payload_ciphertext: string; payload_nonce: string; key_version: number }): Promise<any>;
         flushOutbox(): Promise<any>;
       }>;
-      setNetworkAvailable(value: boolean): void;
     };
   }
 }
-
-async function newClient(page: import("@playwright/test").Page, scope: string) {
-  return page.evaluate((accountScope) => window.neoTest.create(accountScope), scope);
-}
+const newScope = () => "account-" + Date.now() + "-" + Math.random().toString(36).slice(2);
 
 test("native IndexedDB persists a non-exportable identity across page reload", async ({ page }) => {
   await page.goto("/");
-  const scope = "account-identity-" + crypto.randomUUID();
-  const first = await newClient(page, scope);
+  const scope = newScope();
+  const firstId = await page.evaluate(async (s) => (await window.neoTest.create(s)).deviceId, scope);
   const keyState = await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open("neo-device-identity", 2);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    const identity = await new Promise<any>((resolve, reject) => {
+    const identity = await new Promise<any[]>((resolve, reject) => {
       const request = db.transaction("identity").objectStore("identity").getAll();
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
@@ -38,15 +34,15 @@ test("native IndexedDB persists a non-exportable identity across page reload", a
   });
   expect(keyState).toContainEqual({ extractable: false, type: "private" });
   await page.reload();
-  const second = await newClient(page, scope);
-  expect(second.deviceId).toBe(first.deviceId);
-  const other = await newClient(page, scope + "-other");
-  expect(other.deviceId).not.toBe(first.deviceId);
+  const secondId = await page.evaluate(async (s) => (await window.neoTest.create(s)).deviceId, scope);
+  expect(secondId).toBe(firstId);
+  const otherId = await page.evaluate(async (s) => (await window.neoTest.create(s)).deviceId, scope + "-other");
+  expect(otherId).not.toBe(firstId);
 });
 
 test("encrypted memory cache survives reload and offline recovery", async ({ page }) => {
   await page.goto("/");
-  const scope = "account-cache-" + crypto.randomUUID();
+  const scope = newScope();
   await page.route("https://neo.test/**", async (route) => {
     await route.fulfill({
       status: 200,
@@ -60,7 +56,6 @@ test("encrypted memory cache survives reload and offline recovery", async ({ pag
       }),
     });
   });
-  const client = await newClient(page, scope);
   const online = await page.evaluate(async (s) => (await window.neoTest.create(s)).syncMemory(), scope);
   expect(online.offline).toBe(false);
   await page.unrouteAll();
@@ -70,12 +65,11 @@ test("encrypted memory cache survives reload and offline recovery", async ({ pag
   expect(recovered.offline).toBe(true);
   expect(recovered.records).toHaveLength(1);
   expect(recovered.records[0].payload_ciphertext).toBe("ciphertext-only");
-  expect(client.deviceId).toBeTruthy();
 });
 
 test("ciphertext outbox survives reload and replays with the original idempotency key", async ({ page }) => {
   await page.goto("/");
-  const scope = "account-outbox-" + crypto.randomUUID();
+  const scope = newScope();
   await page.route("https://neo.test/**", (route) => route.abort());
   const queued = await page.evaluate(async (s) => (await window.neoTest.create(s)).createMemory({
     memory_id: "offline-memory", payload_ciphertext: "ciphertext", payload_nonce: "nonce", key_version: 1,

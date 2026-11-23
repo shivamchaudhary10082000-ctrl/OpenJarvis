@@ -7,10 +7,10 @@ Status: proposed implementation baseline. Nothing in this document implies that 
 NEO is one personal assistant identity available from multiple authorised devices. A phone, tablet, laptop, browser, or future device is a client or an optional compute worker; no physical device is the permanent source of truth.
 
 - Cloud services own identity, task coordination, encrypted durable state, model routing, and audit history.
-- Devices keep only credentials, a small encrypted cache, unsent actions, and optional local/offline model assets.
+- Devices keep only credentials, a small encrypted cache, a ciphertext-only offline outbox, and optional local/offline model assets.
 - Any online authorised device can resume the same conversation and access the same approved memory and skills.
 - A device may contribute compute only while online, healthy, and explicitly enabled for that class of task.
-- When every device is offline, cloud inference and cloud sync are unavailable. The current device may use an explicitly configured local fallback.
+- When every device is offline, cloud inference and cloud sync are unavailable. Encrypted cached memory and queued actions remain available. A local inference fallback is a future opt-in capability; it is not implemented in the current clients.
 
 ## Target topology
 
@@ -75,6 +75,7 @@ Do not invent a custom password protocol or store reusable provider API keys on 
 - Keep large attachments in R2 and structured metadata in D1.
 - Preferred privacy mode: encrypt memory payloads on the client before upload. This prevents the service from reading the contents, but also prevents server-side semantic search. If server-side semantic search is later enabled, it must be a separately disclosed, opt-in privacy mode.
 - Sync only approved memory by default. Pending candidates may sync as encrypted review items but remain non-recallable on every device.
+- Offline clients persist encrypted memory records and idempotent queued writes/tasks. Reconnect flushes the outbox with stable idempotency keys; conflicting key reuse is rejected rather than duplicated.
 - Deletion must propagate as a tombstone and be applied to caches and replicas.
 
 ## Model routing: no silent downgrade
@@ -86,6 +87,8 @@ Define three explicit tiers:
 3. Offline fallback: a local model on an available device, clearly identified as lower capability.
 
 Routing rules:
+
+- Every paid provider request reserves a worst-case per-request USD cost and input/output token allowance against per-account monthly D1 budgets before the upstream call. Failed attempts are conservatively charged; missing usage is settled at the reservation. Zero budgets/prices fail closed.
 
 - Explicit user model selection is honoured or fails with a clear error; it is never silently replaced.
 - Automatic routing records selected provider, model, tier, reason, and fallback event in the response metadata.

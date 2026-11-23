@@ -137,6 +137,23 @@ export async function createDeviceIdentity():Promise<StoredIdentity>{
 
 export class NeoDeviceClient {
   private constructor(private baseUrl:string,private accessToken:(()=>Promise<string>)|undefined,private identity:StoredIdentity,private scopeKey:string){}
+  static async resolveAccountScope(baseUrl:string,accessToken?:(()=>Promise<string>)):Promise<string>{
+    const normalizedBase=baseUrl.endsWith("/")?baseUrl.slice(0,-1):baseUrl;
+    const headers=new Headers();
+    if(accessToken){
+      const token=await accessToken();
+      if(!token.trim())throw new Error("NEO access token callback returned an empty token");
+      headers.set("authorization","Bearer "+token);
+    }
+    const response=await fetch(normalizedBase+"/v1/session",{
+      method:"GET",headers,credentials:"same-origin",cache:"no-store",
+    });
+    if(!response.ok)throw new Error("NEO session bootstrap failed: "+response.status);
+    const payload=await response.json() as {account_id?:unknown};
+    if(typeof payload.account_id!=="string"||!payload.account_id.trim())
+      throw new Error("NEO session bootstrap returned no account scope");
+    return payload.account_id;
+  }
   static async create(baseUrl:string,accessToken:(()=>Promise<string>)|undefined,accountScope:string){
     if(!accountScope.trim())throw new Error("A stable account scope is required for local device storage");
     const scopeKey=toB64u(await sha256(enc.encode(accountScope)));

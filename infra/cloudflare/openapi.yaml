@@ -16,6 +16,7 @@ servers:
         default: neo-staging.example.workers.dev
 security:
   - cloudflareAccess: []
+  - cloudflareAccessAssertion: []
 paths:
   /health:
     get:
@@ -35,6 +36,24 @@ paths:
                 properties:
                   status:
                     const: ok
+  /session:
+    get:
+      operationId: getSessionIdentity
+      summary: Resolve the authenticated account subject for browser storage bootstrap
+      description: Returns only the verified Cloudflare Access subject. No device proof is required before first enrolment. The response is not cacheable.
+      responses:
+        "200":
+          description: Verified account scope for the signed-in Access session
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [account_id]
+                properties:
+                  account_id:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /devices:
     get:
       operationId: listDevices
@@ -543,7 +562,12 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Cloudflare Access JWT; Worker must verify issuer, signature, audience, and expiry.
+      description: Cloudflare Access JWT for native or controlled clients; Worker verifies issuer, signature, audience, and expiry.
+    cloudflareAccessAssertion:
+      type: apiKey
+      in: header
+      name: Cf-Access-Jwt-Assertion
+      description: Signed assertion injected by Cloudflare Access for protected browser requests. Browser JavaScript must not read or set this header.
   parameters:
     DeviceId:
       name: X-NEO-Device-ID

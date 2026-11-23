@@ -106,6 +106,41 @@ describe("browser IndexedDB persistence and recovery", () => {
     expect(fetchMock.mock.calls[0][1]?.credentials).toBe("same-origin");
   });
 
+  it("resolves the account scope from the authenticated same-origin session bootstrap", async () => {
+    const subject = account();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ account_id: subject }),
+      { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(NeoDeviceClient.resolveAccountScope("https://neo.test/")).resolves.toBe(subject);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://neo.test/v1/session");
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.credentials).toBe("same-origin");
+    expect(init.cache).toBe("no-store");
+    expect(new Headers(init.headers).get("authorization")).toBeNull();
+  });
+
+  it("uses a fresh host token for session bootstrap without persisting it", async () => {
+    const subject = account();
+    const accessToken = vi.fn(async () => "bootstrap-only-ephemeral-token");
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      JSON.stringify({ account_id: subject }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(NeoDeviceClient.resolveAccountScope("https://neo.test", accessToken)).resolves.toBe(subject);
+
+    expect(accessToken).toHaveBeenCalledTimes(1);
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get("authorization"))
+      .toBe("Bearer bootstrap-only-ephemeral-token");
+    expect(fetchMock.mock.calls[0][1]?.cache).toBe("no-store");
+  });
+
   it("uses same-origin Access cookies for first device enrolment without a JavaScript bearer token", async () => {
     const client = await NeoDeviceClient.create("https://neo.test", undefined, account());
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(
@@ -120,6 +155,32 @@ describe("browser IndexedDB persistence and recovery", () => {
     const init = fetchMock.mock.calls[0][1] as RequestInit;
     expect(init.credentials).toBe("same-origin");
     expect(new Headers(init.headers).get("authorization")).toBeNull();
+  });
+
+  it.each([401, 403])("keeps queued ciphertext intact when authentication is blocked with HTTP %s", async (status) => {
+    const client = await NeoDeviceClient.create("https://neo.test", token, account());
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")));
+    const queued = await client.createMemory({
+      memory_id: "memory-auth-blocked",
+      payload_ciphertext: "encrypted-content",
+      payload_nonce: "nonce",
+      key_version: 1,
+    });
+    expect(queued).toMatchObject({ status: "queued_offline", kind: "memory.create" });
+
+    const blockedFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response("{}", { status }));
+    vi.stubGlobal("fetch", blockedFetch);
+    const blocked = await client.flushOutbox();
+    expect(blocked).toMatchObject({ sent: 0, remaining: 1 });
+    expect(blocked.blocked_on).toBeTruthy();
+
+    const recoveredFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response("{}", { status: 201 }));
+    vi.stubGlobal("fetch", recoveredFetch);
+    await expect(client.flushOutbox()).resolves.toMatchObject({
+      sent: 1,
+      remaining: 0,
+      blocked_on: null,
+    });
   });
 
   it("uses a fresh host-provided access token for enrolment and every request without persisting it", async () => {

@@ -208,6 +208,29 @@ describe("D1-backed Access and device proof", () => {
     expect(signatureResponse.status).toBe(401);
   });
 
+  it("returns only the verified Access subject for browser account-scope bootstrap", async () => {
+    const subject = "browser-bootstrap-" + crypto.randomUUID();
+    const token = await accessToken(subject);
+    const response = await worker.fetch(new Request(baseUrl + "/v1/session", {
+      headers: { "cf-access-jwt-assertion": token },
+    }), bindings);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ account_id: subject });
+
+    // A present invalid assertion remains authoritative even if a valid bearer
+    // token is also supplied; the bootstrap route must not weaken precedence.
+    const fallback = await accessToken("must-not-be-used-" + crypto.randomUUID());
+    const rejected = await worker.fetch(new Request(baseUrl + "/v1/session", {
+      headers: {
+        "cf-access-jwt-assertion": "invalid.assertion.value",
+        authorization: "Bearer " + fallback,
+      },
+    }), bindings);
+    expect(rejected.status).toBe(401);
+  });
+
   it("accepts the Cloudflare Access injected browser assertion with the same JWT validation", async () => {
     const device = await enrolDevice("access-assertion-" + crypto.randomUUID(), "Browser assertion device");
     const bearerRequest = await signedRequest(device, "/v1/devices");

@@ -265,6 +265,18 @@ async function route(req: Request, env: Env): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname.replace(/^\/v1/, "") || "/";
   if (req.method === "GET" && path === "/health") return json({ status: "ok", environment: env.NEO_ENV || "unset" });
+  // Browser bootstrap needs the verified account subject before the client can
+  // select its account-scoped IndexedDB identity. This endpoint deliberately
+  // requires Access authentication but no device proof, because enrolment has
+  // not happened yet. Return no other identity-provider claims.
+  if (req.method === "GET" && path === "/session") {
+    try {
+      const claims = await accessClaimsFromRequest(req, env);
+      return json({ account_id: claims.sub });
+    } catch {
+      return fail(401, "unauthorized", "A valid Cloudflare Access session is required");
+    }
+  }
   if (!path.startsWith("/")) return fail(404, "not_found", "Route not found");
   // First enrolment uses Access identity and binds a client-generated P-256 key.
   if (path === "/devices" && req.method === "POST") {

@@ -1056,7 +1056,7 @@ describe("Google OIDC identity bootstrap", () => {
       true,
       ["sign", "verify"],
     );
-    googlePublicJwk = await crypto.subtle.exportKey("jwk", googleKeys.publicKey);
+    googlePublicJwk = { ...(await crypto.subtle.exportKey("jwk", googleKeys.publicKey)), kid: "neo-google-test-key", alg: "RS256", use: "sig" };
   });
 
   async function token(overrides: Record<string, unknown> = {}, signingKey = googleKeys.privateKey) {

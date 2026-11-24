@@ -2,6 +2,8 @@ export interface Env {
   DB: D1Database;
   ACCESS_TEAM_DOMAIN: string;
   ACCESS_AUD: string;
+  GOOGLE_OAUTH_CLIENT_IDS?: string;
+  GOOGLE_WEB_CLIENT_ID?: string;
   MODEL_PRIMARY_URL?: string;
   MODEL_PRIMARY_NAME?: string;
   MODEL_PRIMARY_API_KEY?: string;
@@ -195,22 +197,64 @@ async function accessClaims(token: string, env: Env): Promise<Claims> {
   return claims;
 }
 function accessTokenFromRequest(req: Request): string {
-  // Cloudflare Access injects this signed assertion for protected browser
-  // requests. If present, it is authoritative even when empty or invalid.
+  // Cloudflare Access assertion is authoritative when present, including empty/invalid values.
   const assertion = req.headers.get("cf-access-jwt-assertion");
   if (assertion !== null) return assertion.trim();
   const authorization = req.headers.get("authorization") || "";
   return authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
 }
-async function accessClaimsFromRequest(req: Request, env: Env): Promise<Claims> {
+async function googleClaims(token: string, env: Env): Promise<Claims> {
+  const allowedAudiences = (env.GOOGLE_OAUTH_CLIENT_IDS || "").split(",").map(value => value.trim()).filter(Boolean);
+  if (!allowedAudiences.length) throw new Error("Google authentication is not configured");
+  const parts = token.split(".");
+  if (parts.length !== 3) throw new Error("Malformed Google ID token");
+  const header = JSON.parse(new TextDecoder().decode(b64u(parts[0]))) as { alg?: string; kid?: string };
+  if (header.alg !== "RS256" || !header.kid) throw new Error("Unsupported Google ID token algorithm");
+  const response = await fetch("https://www.googleapis.com/oauth2/v3/certs");
+  if (!response.ok) throw new Error("Unable to retrieve Google signing keys");
+  const jwks = await response.json() as { keys: Array<JsonWebKey & { kid?: string; alg?: string }> };
+  const jwk = jwks.keys.find(key => key.kid === header.kid && key.kty === "RSA" && (!key.alg || key.alg === "RS256"));
+  if (!jwk) throw new Error("Unknown Google signing key");
+  const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+  if (!await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, b64u(parts[2]), enc.encode(parts[0] + "." + parts[1]))) {
+    throw new Error("Invalid Google ID token signature");
+  }
+  const claims = JSON.parse(new TextDecoder().decode(b64u(parts[1]))) as Claims & { iat?: number; azp?: string };
+  const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+  const currentTime = now();
+  if (
+    (claims.iss !== "https://accounts.google.com" && claims.iss !== "accounts.google.com") ||
+    !audiences.some(audience => allowedAudiences.includes(audience)) ||
+    (audiences.length > 1 && (!claims.azp || !allowedAudiences.includes(claims.azp))) ||
+    typeof claims.sub !== "string" || !/^[A-Za-z0-9_-]{1,255}$/.test(claims.sub) ||
+    !Number.isFinite(claims.exp) || claims.exp <= currentTime ||
+    !Number.isFinite(claims.iat) || Number(claims.iat) > currentTime + 60 ||
+    (claims.nbf !== undefined && (!Number.isFinite(claims.nbf) || claims.nbf > currentTime))
+  ) throw new Error("Invalid Google ID token claims");
+  // Namespace provider subjects so identities from different issuers can never collide.
+  return { ...claims, sub: "google:" + claims.sub };
+}
+async function identityClaimsFromRequest(req: Request, env: Env): Promise<Claims> {
+  const assertion = req.headers.get("cf-access-jwt-assertion");
+  if (assertion !== null) {
+    if (!assertion.trim()) throw new Error("Empty Cloudflare Access assertion");
+    return accessClaims(assertion.trim(), env);
+  }
   const token = accessTokenFromRequest(req);
-  if (!token) throw new Error("Missing Cloudflare Access token");
+  if (!token) throw new Error("Missing identity token");
+  if (env.GOOGLE_OAUTH_CLIENT_IDS) {
+    try { return await googleClaims(token, env); } catch (googleError) {
+      // Backward compatibility during migration: only a fully verified Access
+      // JWT may be accepted as fallback; arbitrary/invalid bearer tokens fail closed.
+      try { return await accessClaims(token, env); } catch { throw googleError; }
+    }
+  }
   return accessClaims(token, env);
 }
 async function authenticate(req: Request, env: Env): Promise<{ account: string; device: Device }> {
   // Browser assertions and native/controlled bearer tokens share the exact
   // same RS256, issuer, audience and expiry validation.
-  const claims = await accessClaimsFromRequest(req, env);
+  const claims = await identityClaimsFromRequest(req, env);
   const account = claims.sub;
   await env.DB.prepare("INSERT OR IGNORE INTO accounts(account_id, created_at, status) VALUES(?, ?, 'active')").bind(account, now()).run();
   const accountRow = await env.DB.prepare("SELECT status FROM accounts WHERE account_id = ?").bind(account).first<{status:string}>();
@@ -264,21 +308,21 @@ function validCipher(x: any): boolean {
 async function route(req: Request, env: Env): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname.replace(/^\/v1/, "") || "/";
-  if (req.method === "GET" && path === "/health") return json({ status: "ok", environment: env.NEO_ENV || "unset" });
+  if (req.method === "GET" && path === "/health") return json({ status: "ok", environment: env.NEO_ENV || "unset" });\n  if (req.method === "GET" && path === "/config") return json({ google_web_client_id: env.GOOGLE_WEB_CLIENT_ID || null });
   // Browser bootstrap needs the verified account subject before the client can
   // select its account-scoped IndexedDB identity. This endpoint deliberately
   // requires Access authentication but no device proof, because enrolment has
   // not happened yet. Return no other identity-provider claims.
   if (req.method === "GET" && path === "/session") {
     try {
-      const claims = await accessClaimsFromRequest(req, env);
+      const claims = await identityClaimsFromRequest(req, env);
       return json({ account_id: claims.sub });
     } catch {
-      return fail(401, "unauthorized", "A valid Cloudflare Access session is required");
+      return fail(401, "unauthorized", "A valid NEO identity session is required");
     }
   }
   if (!path.startsWith("/")) return fail(404, "not_found", "Route not found");
-  // First enrolment uses Access identity and binds a client-generated P-256 key.
+  // First enrolment uses a verified identity token and binds a client-generated P-256 key.
   if (path === "/devices" && req.method === "POST") {
     try {
       // First enrolment must support the same cookie/assertion browser flow as

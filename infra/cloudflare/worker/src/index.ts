@@ -161,6 +161,23 @@ export function decodeMemoryCursor(token: string): number | null {
   }
 }
 const id = () => crypto.randomUUID();
+type GoogleSigningJwk = JsonWebKey & { kid?: string; alg?: string };
+let googleJwksCache: { expiresAt: number; keys: GoogleSigningJwk[] } | null = null;
+async function googleSigningKey(kid: string): Promise<GoogleSigningJwk> {
+  const cached = googleJwksCache && googleJwksCache.expiresAt > Date.now()
+    ? googleJwksCache.keys.find(key => key.kid === kid && key.kty === "RSA" && (!key.alg || key.alg === "RS256"))
+    : undefined;
+  if (cached) return cached;
+  // Refresh on expiry and on an unknown kid so key rotation is handled immediately.
+  const response = await fetch("https://www.googleapis.com/oauth2/v3/certs");
+  if (!response.ok) throw new Error("Unable to retrieve Google signing keys");
+  const jwks = await response.json() as { keys?: GoogleSigningJwk[] };
+  if (!Array.isArray(jwks.keys) || !jwks.keys.length) throw new Error("Google signing key set is empty");
+  googleJwksCache = { keys: jwks.keys, expiresAt: Date.now() + 5 * 60 * 1000 };
+  const key = jwks.keys.find(item => item.kid === kid && item.kty === "RSA" && (!item.alg || item.alg === "RS256"));
+  if (!key) throw new Error("Unknown Google signing key");
+  return key;
+}
 const safeEqual = (a: string, b: string) => {
   if (a.length !== b.length) return false;
   let n = 0; for (let i = 0; i < a.length; i++) n |= a.charCodeAt(i) ^ b.charCodeAt(i);
@@ -210,11 +227,7 @@ async function googleClaims(token: string, env: Env): Promise<Claims> {
   if (parts.length !== 3) throw new Error("Malformed Google ID token");
   const header = JSON.parse(new TextDecoder().decode(b64u(parts[0]))) as { alg?: string; kid?: string };
   if (header.alg !== "RS256" || !header.kid) throw new Error("Unsupported Google ID token algorithm");
-  const response = await fetch("https://www.googleapis.com/oauth2/v3/certs");
-  if (!response.ok) throw new Error("Unable to retrieve Google signing keys");
-  const jwks = await response.json() as { keys: Array<JsonWebKey & { kid?: string; alg?: string }> };
-  const jwk = jwks.keys.find(key => key.kid === header.kid && key.kty === "RSA" && (!key.alg || key.alg === "RS256"));
-  if (!jwk) throw new Error("Unknown Google signing key");
+  const jwk = await googleSigningKey(header.kid);
   const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
   if (!await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, b64u(parts[2]), enc.encode(parts[0] + "." + parts[1]))) {
     throw new Error("Invalid Google ID token signature");

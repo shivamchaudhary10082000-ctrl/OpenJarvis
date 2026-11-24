@@ -7,8 +7,8 @@ const $ = <T extends HTMLElement>(id: string) => {
   if (!node) throw new Error("Missing UI element: " + id);
   return node as T;
 };
-const connectButton = $("connect-button") as HTMLButtonElement;
-const welcomeConnect = $("welcome-connect") as HTMLButtonElement;
+const googleButton = $("google-signin");
+const googleTopButton = $("google-signin-top");
 const connectionState = $("connection-state");
 const welcome = $("welcome");
 const chatPanel = $("chat-panel");

@@ -270,4 +270,21 @@ export class NeoDeviceClient {
   async synthesize(request:unknown){
     return this.request("/voice/synthesize",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(request)});
   }
+
+  async chatCompletion(input:{messages:Array<{role:"system"|"user"|"assistant";content:string}>;model?:string;max_tokens?:number}){
+    if(!Array.isArray(input.messages)||input.messages.length<1||input.messages.length>100)
+      throw new Error("A conversation must contain 1–100 messages");
+    const response=await this.request("/chat/completions",{method:"POST",body:JSON.stringify({
+      messages:input.messages,
+      model:input.model||"auto",
+      allow_fallback:true,
+      max_tokens:input.max_tokens??512,
+    })});
+    const payload=await response.json().catch(()=>({}));
+    if(!response.ok){
+      const detail=(payload as {error?:{message?:string;code?:string}})?.error;
+      throw new Error(detail?.message||detail?.code||("NEO chat request failed: "+response.status));
+    }
+    return payload as {choices?:Array<{message?:{role?:string;content?:string}}>;neo?:{provider?:string;model?:string}};
+  }
 }

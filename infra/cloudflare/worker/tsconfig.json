@@ -18,8 +18,8 @@
   "include": [
     "src/**/*.ts",
     "test/**/*.ts",
-    "../clients/web/**/*.ts",
-    "vitest.config.ts"
+    "vitest.config.ts",
+    "../clients/web/neo-client.ts"
   ],
   "exclude": [
     "test/native-browser/**"

@@ -271,6 +271,13 @@ export class NeoDeviceClient {
     return this.request("/voice/synthesize",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(request)});
   }
 
+
+  async listDevices(){
+    const response=await this.request("/devices");
+    const payload=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error("Device list failed: "+response.status);
+    return payload as {devices?:Array<{device_id:string;status:string;presence:string;label:string;platform:string}>};
+  }
   async chatCompletion(input:{messages:Array<{role:"system"|"user"|"assistant";content:string}>;model?:string;max_tokens?:number}){
     if(!Array.isArray(input.messages)||input.messages.length<1||input.messages.length>100)
       throw new Error("A conversation must contain 1–100 messages");

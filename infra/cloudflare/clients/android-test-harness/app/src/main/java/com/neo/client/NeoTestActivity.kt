@@ -21,7 +21,8 @@ import java.util.UUID
 class NeoTestActivity : Activity() {
     private val accountScope = "neo-physical-device-test"
     private val identity by lazy { NeoDeviceIdentity("neo-manual-test-p256") }
-    private val store by lazy { NeoOfflineStore(this, accountScope) }
+    private val storeLazy = lazy { NeoOfflineStore(this, accountScope) }
+    private val store by storeLazy
     private lateinit var output: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -125,7 +126,7 @@ class NeoTestActivity : Activity() {
     }
 
     override fun onDestroy() {
-        if (::output.isInitialized) {
+        if (storeLazy.isInitialized()) {
             try { store.close() } catch (_: Exception) { }
         }
         super.onDestroy()

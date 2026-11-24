@@ -14,8 +14,6 @@ npm run build
 
 For staging, build this web package before running Wrangler from `infra/cloudflare` so `clients/web/dist` exists.
 
-Set `VITE_NEO_API_BASE_URL` at build time only when the API is hosted on a different origin. Do not put secrets in Vite environment variables; values are shipped to the browser.
-
 ## Runtime prerequisites
 
 - The initial Alpha expects the UI and API to share one origin. The disposable Wrangler template serves the built `dist` directory as Worker assets and sends `/v1/*` through the Worker.

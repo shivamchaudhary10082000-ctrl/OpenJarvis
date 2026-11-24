@@ -8,15 +8,18 @@ Requires Node.js 22+.
 
 ```sh
 npm install
-npm run build
 npm run dev
+npm run build
 ```
+
+For staging, build this web package before running Wrangler from `infra/cloudflare` so `clients/web/dist` exists.
 
 Set `VITE_NEO_API_BASE_URL` at build time only when the API is hosted on a different origin. Do not put secrets in Vite environment variables; values are shipped to the browser.
 
 ## Runtime prerequisites
 
-- Serve the app behind the same Cloudflare Access application that protects the NEO Worker API, or configure the API base URL and CORS/credentials deliberately.
+- The initial Alpha expects the UI and API to share one origin. The disposable Wrangler template serves the built `dist` directory as Worker assets and sends `/v1/*` through the Worker.
+- Protect the app origin and `/v1/*` with the same Cloudflare Access application.
 - Route `/v1/*` to the NEO Worker.
 - Configure the Cloudflare Access issuer and audience on the Worker.
 - Apply the D1 migrations and configure a positive, reviewed provider spend budget, token budgets, provider pricing and output cap before enabling paid chat.

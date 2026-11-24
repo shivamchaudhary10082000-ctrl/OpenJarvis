@@ -308,7 +308,8 @@ function validCipher(x: any): boolean {
 async function route(req: Request, env: Env): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname.replace(/^\/v1/, "") || "/";
-  if (req.method === "GET" && path === "/health") return json({ status: "ok", environment: env.NEO_ENV || "unset" });\n  if (req.method === "GET" && path === "/config") return json({ google_web_client_id: env.GOOGLE_WEB_CLIENT_ID || null });
+  if (req.method === "GET" && path === "/health") return json({ status: "ok", environment: env.NEO_ENV || "unset" });
+  if (req.method === "GET" && path === "/config") return json({ google_web_client_id: env.GOOGLE_WEB_CLIENT_ID || null });
   // Browser bootstrap needs the verified account subject before the client can
   // select its account-scoped IndexedDB identity. This endpoint deliberately
   // requires Access authentication but no device proof, because enrolment has

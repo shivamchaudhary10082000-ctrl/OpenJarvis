@@ -58,7 +58,18 @@ jobs:
       - run: echo "no" | avdmanager create avd --name neo-api-36 --package "system-images;android-36;google_apis;x86_64" --device "pixel_2"
       - name: Boot Android emulator
         run: |
-          emulator -avd neo-api-36 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect &
-          adb wait-for-device
-          timeout 600 bash -c 'until adb shell getprop sys.boot_completed | tr -d "\\r" | grep -q "1"; do sleep 2; done'
+          set -euo pipefail
+          emulator_log="$RUNNER_TEMP/neo-emulator.log"
+          "$ANDROID_HOME/emulator/emulator" -avd neo-api-36 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect >"$emulator_log" 2>&1 &
+          emulator_pid=$!
+          if ! timeout 120 adb wait-for-device; then
+            cat "$emulator_log"
+            kill "$emulator_pid" 2>/dev/null || true
+            exit 1
+          fi
+          if ! timeout 600 bash -c 'until adb shell getprop sys.boot_completed | tr -d "\\r" | grep -q "1"; do sleep 2; done'; then
+            cat "$emulator_log"
+            adb logcat -d -t 200 || true
+            exit 1
+          fi
       - run: gradle connectedDebugAndroidTest

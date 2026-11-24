@@ -1,0 +1,33 @@
+name: NEO Web Alpha
+
+on:
+  pull_request:
+    paths:
+      - "infra/cloudflare/clients/web/**"
+      - "infra/cloudflare/worker/src/**"
+      - ".github/workflows/neo-web-alpha.yml"
+  push:
+    branches: [main]
+    paths:
+      - "infra/cloudflare/clients/web/**"
+      - "infra/cloudflare/worker/src/**"
+      - ".github/workflows/neo-web-alpha.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/cloudflare/clients/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: infra/cloudflare/clients/web/package.json
+      - run: npm install --no-audit --no-fund
+      - run: npm run build

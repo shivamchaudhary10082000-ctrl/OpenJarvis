@@ -55,7 +55,7 @@ async function connect() {
   welcomeConnect.disabled = true;
   connectionState.textContent = "Connecting…";
   try {
-    const baseUrl = (import.meta.env.VITE_NEO_API_BASE_URL || window.location.origin).replace(/\/$/, "");
+    const baseUrl = window.location.origin;
     const account = await NeoDeviceClient.resolveAccountScope(baseUrl);
     const device = await NeoDeviceClient.create(baseUrl, undefined, account);
     await device.enrol("NEO Browser", "browser", ["chat", "memory.sync"]);

@@ -49,6 +49,21 @@ internal fun validateNeoApiBaseUrl(baseUrl: String) {
  *
  * Requires OkHttp 4.12+ and Android API 23+.
  */
+internal fun buildNeoChatCompletionBody(
+    messages: org.json.JSONArray,
+    model: String? = null,
+    maxTokens: Int = 512
+): String {
+    require(messages.length() in 1..100) { "messages must contain 1–100 entries" }
+    require(maxTokens in 1..1024) { "maxTokens must be between 1 and 1024" }
+    val body = JSONObject()
+        .put("messages", messages)
+        .put("max_tokens", maxTokens)
+        .put("allow_fallback", true)
+    if (!model.isNullOrBlank()) body.put("model", model.trim())
+    return body.toString()
+}
+
 class NeoAndroidClient(
     context: Context,
     private val baseUrl: String,
@@ -249,4 +264,38 @@ class NeoAndroidClient(
 
     suspend fun synthesize(jsonBody: String): okhttp3.Response =
         signedRequest("POST", "/voice/synthesize", jsonBody.toByteArray(), "application/json")
+
+    /**
+     * Send a non-streaming text conversation to the authenticated NEO Worker.
+     * The Worker applies provider routing and fail-closed spend/token controls.
+     * Chat content is sent to the configured model provider; this method does
+     * not persist conversation history or claim end-to-end encrypted chat.
+     */
+    suspend fun chatCompletions(
+        messages: org.json.JSONArray,
+        model: String? = null,
+        maxTokens: Int = 512
+    ): JSONObject {
+        val body = buildNeoChatCompletionBody(messages, model, maxTokens)
+        val response = signedRequest(
+            "POST",
+            "/chat/completions",
+            body.toByteArray(Charsets.UTF_8),
+            "application/json"
+        )
+        response.use {
+            val responseBody = it.body?.string().orEmpty()
+            if (!it.isSuccessful) {
+                val detail = try {
+                    JSONObject(responseBody).optJSONObject("error")?.optString("message")
+                } catch (_: Exception) { null }
+                throw IllegalStateException(
+                    detail?.takeIf { message -> message.isNotBlank() }
+                        ?: "NEO chat request failed: HTTP ${it.code}"
+                )
+            }
+            return JSONObject(responseBody)
+        }
+    }
+
 }

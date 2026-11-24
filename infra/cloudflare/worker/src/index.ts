@@ -344,7 +344,7 @@ async function route(req: Request, env: Env): Promise<Response> {
     try {
       // First enrolment must support the same cookie/assertion browser flow as
       // every subsequent signed request. A present invalid assertion fails closed.
-      const claims = await accessClaimsFromRequest(req, env);
+      const claims = await identityClaimsFromRequest(req, env);
       const x = await bodyJson<any>(req, env);
       const deviceId = req.headers.get("x-neo-device-id") || "";
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(deviceId) || typeof x.label !== "string" ||

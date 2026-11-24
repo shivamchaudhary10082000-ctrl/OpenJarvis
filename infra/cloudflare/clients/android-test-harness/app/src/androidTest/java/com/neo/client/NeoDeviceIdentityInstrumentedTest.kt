@@ -44,4 +44,13 @@ class NeoDeviceIdentityInstrumentedTest {
         recovered.close()
         context.deleteDatabase("neo-offline-" + neoAccountScopeHash(scope) + ".db")
     }
+    @Test fun installableDiagnosticActivityLaunchesOnDevice() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val intent = android.content.Intent(context, NeoTestActivity::class.java)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        val activity = InstrumentationRegistry.getInstrumentation().startActivitySync(intent)
+        assertNotNull(activity)
+        assertFalse(activity.isFinishing)
+        activity.finish()
+    }
 }

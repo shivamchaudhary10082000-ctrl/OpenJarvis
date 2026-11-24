@@ -11,7 +11,7 @@ Intended resources:
 - D1 for accounts, devices, encrypted memory revisions, task leases, audit records, rate limits, idempotency and spend/token ledgers. A 15-minute Worker cron removes expired device nonces; settled spend records are retained for audit.
 - R2 for client-encrypted attachments, exports and snapshots (not yet implemented).
 - Durable Objects for per-account ordering, device/task coordination and presence (not yet implemented).
-- Cloudflare Access for user identity; the Worker verifies the Access JWT itself.
+- Google OpenID Connect for owner identity on browser and Android; the Worker verifies Google ID-token signatures and claims against Google's published signing keys. Cloudflare Access remains a temporary, independently verified migration fallback only.
 
 ## Staging resource status
 
@@ -50,3 +50,7 @@ All non-test defaults for budgets, model pricing and voice ceilings are zero. Th
 ## Not yet complete
 
 A Wrangler deployment dry-run against the test configuration passes in CI, but no Cloudflare resources are provisioned. R2, Durable Object coordination, automated spend-reservation reconciliation, budget alerts, local model inference fallback, background outbox retry scheduling, remote D1 staging tests, rollback/restore rehearsal and independent penetration testing remain outstanding.
+
+## Google OIDC authentication implementation status
+
+The Worker now supports Google ID-token verification for session bootstrap, first device enrolment and subsequent signed requests. It validates RS256 signatures against Google's fixed JWKS endpoint, issuer, configured audience, expiry and issued-at time, and namespaces accounts as `google:<sub>`. The browser Alpha now uses Google Identity Services and passes the ID token to the Worker. The Android transport accepts an identity-token callback and exposes `resolveAccountScope`; the host Android UI still needs Credential Manager wiring and a configured Web OAuth client ID before a physical-device login can be proven. Cloudflare Access JWT verification remains available only as a migration fallback while existing tests and clients transition.

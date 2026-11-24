@@ -5,8 +5,8 @@ import { createDeviceIdentity, selectRecallableMemory } from "../../clients/web/
 
 const encoder = new TextEncoder();
 const bindings = env as unknown as Env;
-const issuer = bindings.ACCESS_TEAM_DOMAIN.replace(/\/$/, "");
-const audience = bindings.ACCESS_AUD;
+const issuer = (bindings.ACCESS_TEAM_DOMAIN || "").replace(/\/$/, "");
+const audience = bindings.ACCESS_AUD || "";
 const baseUrl = "https://neo.integration.test";
 let accessKeys: CryptoKeyPair;
 let accessPublicJwk: JsonWebKey;

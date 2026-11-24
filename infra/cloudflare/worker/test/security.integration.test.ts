@@ -1044,3 +1044,83 @@ describe("D1 spend ledger invariants", () => {
     expect(usage).toMatchObject({ reserved_microusd: 0, spent_microusd: 250 });
   });
 });
+
+describe("Google OIDC identity bootstrap", () => {
+  const clientId = "neo-web-test.apps.googleusercontent.com";
+  let googleKeys: CryptoKeyPair;
+  let googlePublicJwk: JsonWebKey;
+
+  beforeAll(async () => {
+    googleKeys = await crypto.subtle.generateKey(
+      { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+      true,
+      ["sign", "verify"],
+    );
+    googlePublicJwk = await crypto.subtle.exportKey("jwk", googleKeys.publicKey);
+  });
+
+  async function token(overrides: Record<string, unknown> = {}, signingKey = googleKeys.privateKey) {
+    const header = base64UrlJson({ alg: "RS256", kid: "neo-google-test-key" });
+    const payload = base64UrlJson({
+      iss: "https://accounts.google.com",
+      aud: clientId,
+      sub: "google-test-subject-123",
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 300,
+      ...overrides,
+    });
+    const input = header + "." + payload;
+    const signature = new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", signingKey, encoder.encode(input)));
+    return input + "." + base64Url(signature);
+  }
+
+  function mockGoogleKeys() {
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      if (String(input) === "https://www.googleapis.com/oauth2/v3/certs") {
+        return new Response(JSON.stringify({ keys: [googlePublicJwk] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response("not found", { status: 404 });
+    });
+  }
+
+  it("accepts a Google-signed ID token with the configured audience and namespaces the account", async () => {
+    mockGoogleKeys();
+    const identityToken = await token();
+    const response = await worker.fetch(new Request(baseUrl + "/v1/session", {
+      headers: { authorization: "Bearer " + identityToken },
+    }), { ...bindings, GOOGLE_OAUTH_CLIENT_IDS: clientId } as Env);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ account_id: "google:google-test-subject-123" });
+  });
+
+  it.each([
+    ["wrong issuer", { iss: "https://attacker.invalid" }],
+    ["wrong audience", { aud: "another-client.apps.googleusercontent.com" }],
+    ["expired token", { exp: 1 }],
+    ["future issued-at", { iat: Math.floor(Date.now() / 1000) + 120 }],
+  ])("rejects Google ID tokens with %s", async (_label, overrides) => {
+    mockGoogleKeys();
+    const identityToken = await token(overrides as Record<string, unknown>);
+    const response = await worker.fetch(new Request(baseUrl + "/v1/session", {
+      headers: { authorization: "Bearer " + identityToken },
+    }), { ...bindings, GOOGLE_OAUTH_CLIENT_IDS: clientId } as Env);
+    expect(response.status).toBe(401);
+  });
+
+  it("rejects a Google ID token with an invalid signature", async () => {
+    mockGoogleKeys();
+    const unrelated = await crypto.subtle.generateKey(
+      { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+      true,
+      ["sign", "verify"],
+    );
+    const identityToken = await token({}, unrelated.privateKey);
+    const response = await worker.fetch(new Request(baseUrl + "/v1/session", {
+      headers: { authorization: "Bearer " + identityToken },
+    }), { ...bindings, GOOGLE_OAUTH_CLIENT_IDS: clientId } as Env);
+    expect(response.status).toBe(401);
+  });
+});

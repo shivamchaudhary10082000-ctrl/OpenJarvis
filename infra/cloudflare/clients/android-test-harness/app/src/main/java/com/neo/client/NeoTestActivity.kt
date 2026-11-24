@@ -75,6 +75,11 @@ class NeoTestActivity : Activity() {
     private fun checkIdentity() {
         identity.ensureKey()
         val jwk = identity.publicJwk()
+        // Fingerprint only the public coordinates; never expose or export the private key.
+        val fingerprintInput = "P-256\n${jwk.getValue("x")}\n${jwk.getValue("y")}"
+        val fingerprint = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(fingerprintInput.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
         val signature = identity.sign(
             "GET", "neo.local.test", "/v1/memory", 1L,
             UUID.randomUUID().toString().replace("-", ""),
@@ -85,6 +90,8 @@ class NeoTestActivity : Activity() {
             appendLine("PASS — Android Keystore identity created and signed a test request.")
             appendLine("Curve: ${jwk["crv"]}")
             appendLine("Public key coordinates: valid 32-byte Base64URL values")
+            appendLine("Public-key SHA-256 fingerprint: $fingerprint")
+            appendLine("Compare this fingerprint before and after an app restart; matching values prove the same public identity was reused.")
             appendLine("Signature length: ${signature.length}")
             appendLine("The private key remains inside Android Keystore.")
             appendLine("Run this check again after closing/reopening the app to check persistence.")

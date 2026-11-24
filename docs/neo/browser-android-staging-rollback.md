@@ -14,19 +14,29 @@ The tests must pass in the NEO Worker CI before treating browser persistence as 
 
 ## Android physical-device test plan
 
-There is no Android Gradle application/test harness or attached Android device in this repository session. Do not claim a real-device pass. Once the host app exists, run on at least one current Pixel/AOSP device and one Samsung device:
+An installable **local-only diagnostic harness** now exists at `infra/cloudflare/clients/android-test-harness`. It is not the production NEO Android app and does not connect to the Worker, use a microphone, enrol a real account, or encrypt real user data.
 
-1. Install a debug build; enrol device A; create an encrypted memory item and queue an encrypted task.
-2. Enable airplane mode; force-stop the app; reboot the device.
-3. Reopen the app offline; confirm approved cached memory is readable and pending outbox items remain queued.
-4. Re-enable connectivity; invoke outbox flush; confirm each item is accepted once and removed only after a successful response.
-5. Repeat with HTTP 429, HTTP 503, timeout, process death during flush, and a 409 idempotency conflict. A conflict must remain visible for operator/user resolution, not be silently discarded.
-6. Enrol device B to the same account; verify shared server memory and device-specific local queues.
-7. Revoke device A while online; verify subsequent signed requests fail. Document that a disconnected device cannot receive remote wipe/revocation until it reconnects.
-8. Clear app data and reinstall; verify key loss triggers re-enrolment rather than reusing a stale server device ID.
-9. Verify SQLite database and preferences are excluded from Android cloud/device backup, or explicitly document the recovery policy.
+### Manual physical-device evidence — 2026-11-24
 
-The Android source currently persists ciphertext, uses an account-scoped SQLite database and Keystore identity. The outbox success counter was corrected; no Android compile or physical-device test has yet run.
+The owner installed the diagnostic APK on an Android phone and reported:
+- Android Keystore created/verified a P-256 identity and signed a request.
+- A synthetic outbox record was queued in SQLite.
+- After closing and reopening the app, SQLite recovered the same record ID and idempotency key.
+- The record was deleted successfully.
+- A second signing check after app restart passed.
+
+**Still unproven manually:** the last output did not include a stable public-key fingerprint, so it did not establish that the exact same key pair was reused after restart. A follow-up change now displays a SHA-256 fingerprint derived from the public P-256 coordinates. Install the APK from the CI run containing that change, record the fingerprint, force-stop/reopen the app, run the identity check again, and compare the fingerprints. Do not share private-key material; the fingerprint is public-key-only.
+
+### Remaining physical-device matrix
+
+1. Repeat the identity fingerprint check across app restart and full device reboot.
+2. Force-stop and reboot with a queued synthetic record; confirm it remains recoverable.
+3. Exercise SQLite corruption, low-storage and app-data-clear behavior; document when re-enrolment is required.
+4. Test a second Android vendor/device when available.
+5. For the real client (not this harness), test airplane mode, background/foreground recovery, HTTP 429/503, timeout, process death during flush, 409 idempotency conflict, device B sync, device A revocation, and re-enrolment after app-data loss.
+6. Verify backup exclusion on the actual production Android host app. The diagnostic harness manifest sets `android:allowBackup="false"`; that setting does not automatically configure a future host app.
+
+The current harness only validates local key operations and synthetic SQLite persistence. It does not prove end-to-end encryption, real device enrolment, network synchronization, offline AI, background retries or cross-device memory sharing.
 
 ## Browser security review
 
@@ -100,8 +110,8 @@ No Cloudflare deployment, remote migration, export, rollback or resource deletio
 - Keep provider and voice budgets at zero until provider/model, pricing and spend limits are explicitly approved.
 
 
-## Added automated native-client harnesses (2026-11-24; CI pending)
+## Automated native-client harnesses (2026-11-24)
 
-- Android harness: `infra/cloudflare/clients/android-test-harness`. Unit tests cover SQLite outbox persistence across store reconstruction, account-scoped database isolation and plaintext/invalid-idempotency rejection. An emulator instrumentation test covers Android Keystore P-256 identity persistence and signing across client instances.
+- Android harness: `infra/cloudflare/clients/android-test-harness`. Unit tests cover SQLite outbox persistence across store reconstruction, account-scoped database isolation and plaintext/invalid-idempotency rejection. Emulator instrumentation covers Keystore P-256 identity persistence/signing across client instances and SQLite recovery.
 - Browser harness: `infra/cloudflare/worker/test/native-browser`. Playwright runs the real IndexedDB client in Chromium, Firefox and WebKit, including non-exportable CryptoKey persistence, encrypted memory cache recovery and idempotent outbox replay after reload.
-- CI workflows are configured for both harnesses. Their status must be checked on the latest PR head before claiming success. The emulator is not a substitute for real Pixel/Samsung device testing.
+- Latest completed baseline PR head `ffe4a44529e5ad2d49a8a90c9c22d45668f51912` passed Android unit and emulator instrumentation jobs, plus the browser matrix. A new Android fingerprint diagnostic was committed at `6436d374aa61c8b9a67bd7b1bdcf9697547029dc`; its CI run is in progress and must pass before distributing the updated APK.

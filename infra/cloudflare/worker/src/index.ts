@@ -299,6 +299,22 @@ async function route(req: Request, env: Env): Promise<Response> {
         return fail(403, "account_inactive", "Account is not active");
       }
       await enforceAccountRateLimit(claims.sub, env);
+      const existingDevice = await env.DB.prepare(
+        "SELECT account_id, public_key_jwk, revoked_at FROM devices WHERE device_id = ?",
+      ).bind(deviceId).first<{account_id:string;public_key_jwk:string;revoked_at:number|null}>();
+      if (existingDevice) {
+        let existingKey: JsonWebKey | null = null;
+        try { existingKey = JSON.parse(existingDevice.public_key_jwk) as JsonWebKey; } catch {}
+        const sameKey = existingKey?.kty === "EC" && existingKey.crv === "P-256" &&
+          existingKey.x === x.public_key_jwk.x && existingKey.y === x.public_key_jwk.y;
+        if (existingDevice.account_id !== claims.sub || !sameKey) {
+          return fail(409, "device_id_conflict", "Device ID is already bound to a different account or key");
+        }
+        if (existingDevice.revoked_at !== null) {
+          return fail(409, "device_revoked", "This device identity was revoked; create a new local device identity to enrol again");
+        }
+        return json({ device_id: deviceId, account_id: claims.sub, status: "enrolled" }, 200);
+      }
       await env.DB.prepare("INSERT INTO devices(device_id, account_id, label, platform, public_key_jwk, capabilities_json, created_at) VALUES(?,?,?,?,?,?,?)")
         .bind(deviceId, claims.sub, x.label, x.platform, JSON.stringify(x.public_key_jwk), JSON.stringify(x.capabilities.slice(0,32)), now()).run();
       await env.DB.prepare("INSERT INTO audit_events(event_id,account_id,device_id,event_type,created_at) VALUES(?,?,?,?,?)")

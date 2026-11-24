@@ -54,3 +54,12 @@ A Wrangler deployment dry-run against the test configuration passes in CI, but n
 ## Google OIDC authentication implementation status
 
 The Worker now supports Google ID-token verification for session bootstrap, first device enrolment and subsequent signed requests. It validates RS256 signatures against Google's fixed JWKS endpoint, issuer, configured audience, expiry and issued-at time, and namespaces accounts as `google:<sub>`. The browser Alpha now uses Google Identity Services and passes the ID token to the Worker. The Android transport accepts an identity-token callback and exposes `resolveAccountScope`; the installable Android diagnostic harness now uses Google Credential Manager, resolves the Google account scope, enrols its P-256 device key and sends a heartbeat to staging. Build it with `-PgoogleWebClientId=<Google Web OAuth client ID>` and `-PneoApiBaseUrl=<HTTPS disposable staging origin>`. This proves the diagnostic client path, not a production Android assistant UI. A configured OAuth client ID and a real staging deployment are still required for end-to-end device login. Cloudflare Access JWT verification remains available only as a migration fallback while older tests and clients transition.
+
+## Disposable staging deployment workflow
+
+The manual GitHub Actions workflow `.github/workflows/neo-disposable-staging.yml` builds the browser app, lists and applies the checked-in migrations only to `neo-staging-db`, deploys only `neo-api-disposable-staging`, and checks its `/v1/health` endpoint. It requires the workflow_dispatch confirmation checkbox. Before using it, configure these GitHub Actions values:
+
+- Secret `CLOUDFLARE_API_TOKEN`: an account-scoped API token; never paste it into chat or commit it.
+- Variables `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_WORKERS_SUBDOMAIN`, and `NEO_GOOGLE_WEB_CLIENT_ID`.
+
+The token needs Account `D1:Edit`, Workers permission sufficient to deploy the existing Worker (prefer Editor scoped to `neo-api-disposable-staging`; creating a new Worker requires Workers Admin), and Account Settings Read if Wrangler requires it. Do not grant Zero Trust permissions, billing permissions, DNS permissions, or access to unrelated projects. If the Worker does not yet exist, create only the named disposable Worker first, then scope the token to that Worker. The workflow does not configure model-provider secrets; inference remains disabled by zero spend/token limits.

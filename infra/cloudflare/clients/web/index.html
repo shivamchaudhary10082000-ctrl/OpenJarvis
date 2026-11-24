@@ -11,7 +11,7 @@
     <div class="shell">
       <header class="topbar">
         <a class="brand" href="/" aria-label="NEO home"><span class="brand-mark">N</span><span>NEO</span></a>
-        <div class="top-actions"><span id="connection-state" class="state state-idle">Not connected</span><button id="connect-button" class="button button-outline">Connect device</button></div>
+        <div class="top-actions"><span id="connection-state" class="state state-idle">Not connected</span><div id="google-signin-top"></div></div>
       </header>
       <main class="main">
         <section class="welcome" id="welcome">
@@ -35,6 +35,6 @@
       </main>
       <footer><span>NEO Alpha · Early access</span><span id="device-label">No device enrolled</span></footer>
     </div>
-    <script type="module" src="/src/main.ts"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>\n    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

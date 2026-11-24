@@ -50,6 +50,12 @@ class NeoOfflineStoreTest {
         }
     }
 
+    @Test fun signedHostIncludesOnlyNonDefaultHttpsPorts() {
+        assertEquals("neo.example.com", canonicalNeoRequestHost(java.net.URL("https://neo.example.com/v1")))
+        assertEquals("neo.example.com:8443", canonicalNeoRequestHost(java.net.URL("https://neo.example.com:8443/v1")))
+        assertEquals("neo.example.com", canonicalNeoRequestHost(java.net.URL("https://neo.example.com:443/v1")))
+    }
+
     @Test fun accountScopesUseSeparateDatabases() {
         val context = RuntimeEnvironment.getApplication()
         val a = NeoOfflineStore(context, "account-a-" + UUID.randomUUID())

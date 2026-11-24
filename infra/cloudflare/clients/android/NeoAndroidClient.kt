@@ -18,6 +18,15 @@ import java.util.UUID
  * Reject insecure or ambiguous API origins before any Access token can be sent.
  * NEO Android API traffic must use HTTPS and an origin-only base URL.
  */
+internal fun canonicalNeoRequestHost(url: java.net.URL): String {
+    require(url.protocol.equals("https", ignoreCase = true)) { "NEO request URL must use HTTPS" }
+    return if (url.port != -1 && url.port != 443) {
+        url.host + ":" + url.port
+    } else {
+        url.host
+    }
+}
+
 internal fun validateNeoApiBaseUrl(baseUrl: String) {
     val uri = try {
         java.net.URI(baseUrl)
@@ -92,11 +101,7 @@ class NeoAndroidClient(
         val parsed = java.net.URL(url)
         // URL.host excludes a non-default port; the Worker signs URL.host,
         // which includes that port, so preserve it in the canonical request.
-        val canonicalHost = if (parsed.port != -1 && parsed.port != 443) {
-            parsed.host + ":" + parsed.port
-        } else {
-            parsed.host
-        }
+        val canonicalHost = canonicalNeoRequestHost(parsed)
         val timestamp = System.currentTimeMillis() / 1000
         val nonceBytes = ByteArray(24).also { SecureRandom().nextBytes(it) }
         val nonce = Base64.encodeToString(nonceBytes, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)

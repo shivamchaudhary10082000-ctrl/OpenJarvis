@@ -29,6 +29,27 @@ class NeoOfflineStoreTest {
         assertTrue(recovered.pending().isEmpty())
         recovered.close()
     }
+    @Test fun androidApiBaseUrlRequiresHttpsAndAnOriginOnly() {
+        validateNeoApiBaseUrl("https://neo.example.com")
+        validateNeoApiBaseUrl("https://neo.example.com:8443")
+
+        listOf(
+            "http://neo.example.com",
+            "https://user:password@neo.example.com",
+            "https://neo.example.com/api",
+            "https://neo.example.com?token=secret",
+            "https://neo.example.com#fragment",
+            "not-a-url"
+        ).forEach { invalid ->
+            try {
+                validateNeoApiBaseUrl(invalid)
+                fail("Expected invalid API base URL to be rejected: $invalid")
+            } catch (_: IllegalArgumentException) {
+                // Expected: no bearer token may be sent to an insecure/ambiguous origin.
+            }
+        }
+    }
+
     @Test fun accountScopesUseSeparateDatabases() {
         val context = RuntimeEnvironment.getApplication()
         val a = NeoOfflineStore(context, "account-a-" + UUID.randomUUID())

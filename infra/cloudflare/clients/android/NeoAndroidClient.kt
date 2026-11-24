@@ -15,6 +15,25 @@ import java.security.SecureRandom
 import java.util.UUID
 
 /**
+ * Reject insecure or ambiguous API origins before any Access token can be sent.
+ * NEO Android API traffic must use HTTPS and an origin-only base URL.
+ */
+internal fun validateNeoApiBaseUrl(baseUrl: String) {
+    val uri = try {
+        java.net.URI(baseUrl)
+    } catch (error: Exception) {
+        throw IllegalArgumentException("NEO API base URL must be a valid HTTPS origin", error)
+    }
+    require(uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank()) {
+        "NEO API base URL must use HTTPS"
+    }
+    require(uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null &&
+        (uri.rawPath.isNullOrEmpty() || uri.rawPath == "/")) {
+        "NEO API base URL must contain only an origin, without credentials, path, query or fragment"
+    }
+}
+
+/**
  * Small Android transport for the NEO Worker. Uses an Android Keystore-backed
  * non-exportable P-256 signing key. The caller supplies a fresh Cloudflare
  * Access JWT for every request and owns microphone/audio permission handling.
@@ -30,6 +49,10 @@ class NeoAndroidClient(
     private val http: OkHttpClient = OkHttpClient(),
     private val offlineStore: NeoOfflineStore = NeoOfflineStore(context, accountScope)
 ) {
+    init {
+        validateNeoApiBaseUrl(baseUrl)
+    }
+
     private val prefs = context.getSharedPreferences("neo_device_${neoAccountScopeHash(accountScope)}", Context.MODE_PRIVATE)
     val deviceId: String = prefs.getString("device_id", null) ?: UUID.randomUUID().toString().replace("-", "").also {
         prefs.edit().putString("device_id", it).apply()
@@ -67,12 +90,16 @@ class NeoAndroidClient(
         require(pathAndQuery.startsWith("/")) { "Path must be absolute" }
         val url = baseUrl.trimEnd('/') + "/v1" + pathAndQuery
         val parsed = java.net.URL(url)
+        // URL.host excludes a non-default port; the Worker signs URL.host,
+        // which includes that port, so preserve it in the canonical request.
+        val canonicalHost = parsed.host +
+            if (parsed.port != -1 && parsed.port != 443) ":\u0024{parsed.port}" else ""
         val timestamp = System.currentTimeMillis() / 1000
         val nonceBytes = ByteArray(24).also { SecureRandom().nextBytes(it) }
         val nonce = Base64.encodeToString(nonceBytes, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
         val bodyHash = MessageDigest.getInstance("SHA-256").digest(body).joinToString("") { "%02x".format(it) }
         val path = parsed.file.ifEmpty { "/" }
-        val signature = identity.sign(method, parsed.host, path, timestamp, nonce, bodyHash)
+        val signature = identity.sign(method, canonicalHost, path, timestamp, nonce, bodyHash)
         val builder = Request.Builder()
             .url(url)
             .header("Authorization", "Bearer ${accessToken()}")

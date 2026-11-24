@@ -78,4 +78,30 @@ class NeoOfflineStoreTest {
         } catch (_: IllegalArgumentException) { }
         store.close()
     }
+
+    @Test fun chatRequestBuilderCreatesBoundedNonStreamingPayload() {
+        val messages = org.json.JSONArray()
+            .put(org.json.JSONObject().put("role", "user").put("content", "Hello NEO"))
+        val payload = org.json.JSONObject(buildNeoChatCompletionBody(messages, " primary ", 256))
+        assertEquals("primary", payload.getString("model"))
+        assertEquals(256, payload.getInt("max_tokens"))
+        assertEquals(true, payload.getBoolean("allow_fallback"))
+        assertEquals("Hello NEO", payload.getJSONArray("messages").getJSONObject(0).getString("content"))
+    }
+
+    @Test fun chatRequestBuilderRejectsEmptyMessagesAndUnsafeTokenLimits() {
+        try {
+            buildNeoChatCompletionBody(org.json.JSONArray())
+            fail("empty message list must be rejected")
+        } catch (_: IllegalArgumentException) { }
+        val messages = org.json.JSONArray().put(
+            org.json.JSONObject().put("role", "user").put("content", "Hello")
+        )
+        listOf(0, 1025).forEach { limit ->
+            try {
+                buildNeoChatCompletionBody(messages, maxTokens = limit)
+                fail("unsafe token limit must be rejected: $limit")
+            } catch (_: IllegalArgumentException) { }
+        }
+    }
 }

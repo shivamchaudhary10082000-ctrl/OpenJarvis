@@ -18,8 +18,8 @@
           <div class="eyebrow">YOUR PERSONAL AI</div>
           <h1>A clearer way<br />to think and do.</h1>
           <p>One assistant. Your authorised devices. Your control.</p>
-          <button id="welcome-connect" class="button button-primary">Connect to NEO</button>
-          <p class="hint">Sign-in is handled by the protected NEO access gateway.</p>
+          <div id="google-signin" aria-label="Sign in with Google"></div>
+          <p class="hint">Sign in securely with Google. NEO will enrol this browser as an authorised device.</p>
         </section>
         <section id="chat-panel" class="chat-panel" hidden>
           <div class="chat-heading"><div><div class="eyebrow">PRIVATE WORKSPACE</div><h2>Your conversation</h2></div><button id="clear-button" class="button button-quiet">New chat</button></div>
@@ -35,6 +35,7 @@
       </main>
       <footer><span>NEO Alpha · Early access</span><span id="device-label">No device enrolled</span></footer>
     </div>
-    <script src="https://accounts.google.com/gsi/client" async defer></script>\n    <script type="module" src="/src/main.ts"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

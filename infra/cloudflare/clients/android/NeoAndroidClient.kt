@@ -15,7 +15,7 @@ import java.security.SecureRandom
 import java.util.UUID
 
 /**
- * Reject insecure or ambiguous API origins before any Access token can be sent.
+ * Reject insecure or ambiguous API origins before any identity token can be sent.
  * NEO Android API traffic must use HTTPS and an origin-only base URL.
  */
 internal fun canonicalNeoRequestHost(url: java.net.URL): String {
@@ -43,9 +43,10 @@ internal fun validateNeoApiBaseUrl(baseUrl: String) {
 }
 
 /**
- * Small Android transport for the NEO Worker. Uses an Android Keystore-backed
- * non-exportable P-256 signing key. The caller supplies a fresh Cloudflare
- * Access JWT for every request and owns microphone/audio permission handling.
+ * Android transport for the NEO Worker. Uses an Android Keystore-backed
+ * non-exportable P-256 signing key. The host app supplies a fresh Google OIDC
+ * ID token (obtained with Credential Manager) for each request and owns the
+ * sign-in UI and microphone/audio permission handling.
  *
  * Requires OkHttp 4.12+ and Android API 23+.
  */
@@ -67,12 +68,42 @@ internal fun buildNeoChatCompletionBody(
 class NeoAndroidClient(
     context: Context,
     private val baseUrl: String,
-    private val accessToken: suspend () -> String,
+    private val identityToken: suspend () -> String,
     accountScope: String,
     private val identity: NeoDeviceIdentity = NeoDeviceIdentity("neo-device-p256-${neoAccountScopeHash(accountScope)}"),
     private val http: OkHttpClient = OkHttpClient(),
     private val offlineStore: NeoOfflineStore = NeoOfflineStore(context, accountScope)
 ) {
+    companion object {
+        /**
+         * Resolve the stable NEO account scope from a verified Google OIDC ID
+         * token before constructing the account-scoped Android device client.
+         * The caller obtains the token with Google Credential Manager and must
+         * provide a fresh token on each call; tokens are never persisted here.
+         */
+        suspend fun resolveAccountScope(
+            baseUrl: String,
+            identityToken: suspend () -> String,
+            http: OkHttpClient = OkHttpClient()
+        ): String {
+            validateNeoApiBaseUrl(baseUrl)
+            val request = Request.Builder()
+                .url(baseUrl.trimEnd('/') + "/v1/session")
+                .header("Authorization", "Bearer ${identityToken()}")
+                .get()
+                .build()
+            val response = withContext(Dispatchers.IO) { http.newCall(request).execute() }
+            response.use {
+                if (!it.isSuccessful) throw IllegalStateException("NEO identity bootstrap failed: HTTP ${it.code}")
+                val account = JSONObject(it.body?.string() ?: "{}").optString("account_id", "")
+                require(account.startsWith("google:") && account.length > 7) {
+                    "NEO returned an invalid Google account scope"
+                }
+                return account
+            }
+        }
+    }
+
     init {
         validateNeoApiBaseUrl(baseUrl)
     }
@@ -93,7 +124,7 @@ class NeoAndroidClient(
     }
 
     suspend fun enrol(label: String, capabilities: List<String> = emptyList()): okhttp3.Response {
-        val token = accessToken()
+        val token = identityToken()
         val body = enrolmentBody(label, capabilities = capabilities)
         val request = Request.Builder()
             .url(baseUrl.trimEnd('/') + "/v1/devices")
@@ -125,7 +156,7 @@ class NeoAndroidClient(
         val signature = identity.sign(method, canonicalHost, path, timestamp, nonce, bodyHash)
         val builder = Request.Builder()
             .url(url)
-            .header("Authorization", "Bearer ${accessToken()}")
+            .header("Authorization", "Bearer ${identityToken()}")
             .header("X-NEO-Device-ID", deviceId)
             .header("X-NEO-Timestamp", timestamp.toString())
             .header("X-NEO-Nonce", nonce)

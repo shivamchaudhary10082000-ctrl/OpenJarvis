@@ -13,16 +13,24 @@ Intended resources:
 - Durable Objects for per-account ordering, device/task coordination and presence (not yet implemented).
 - Cloudflare Access for user identity; the Worker verifies the Access JWT itself.
 
-## Before provisioning
+## Staging resource status
 
-1. Confirm the Cloudflare account and billing plan.
-2. Create a Cloudflare Access application and record its audience tag and team issuer domain.
-3. Decide account identity, recovery and deletion behavior.
-4. Create D1/R2/Durable Object resources in staging first.
-5. Apply migrations 0001_neo_core.sql through 0008_provider_token_budgets.sql in order.
+A dedicated Cloudflare D1 database has been created for NEO staging:
+- Database name: `neo-staging-db`
+- Database ID: `dd4c03d6-a286-4ac9-abbc-8f162b692acc`
+
+The disposable Wrangler template `wrangler.disposable.example.toml` is bound to this database. The database is not yet migrated or connected to a deployed Worker. Do not create tables manually; apply the checked-in migrations in order after authentication and deployment prerequisites are satisfied.
+
+## Before deployment
+
+1. Confirm the account's billing posture; do not enter payment details or start a paid Zero Trust plan just to unblock this project.
+2. Provision and review a secure account identity/authentication method. The current Worker requires a verified Cloudflare Access JWT for session bootstrap and first device enrolment; device signatures alone do not establish the initial account identity. Do not bypass this requirement or expose unauthenticated enrolment.
+3. If Cloudflare Access Free onboarding requires card authorization, stop and choose a separately reviewed authentication design before deployment. Do not deploy the current Worker with placeholder issuer/audience values.
+4. Decide account identity, recovery and deletion behavior.
+5. Apply migrations 0001_neo_core.sql through 0008_provider_token_budgets.sql in order using Wrangler after verifying the disposable D1 binding.
 6. Configure Access and provider secrets only through Wrangler/Cloudflare secret storage.
-7. Keep provider credentials unset until provider selection, current pricing, monthly USD cap, input/output token caps and voice per-request ceilings are approved.
-8. Deploy only to staging after migration, authentication, rollback and recovery tests pass.
+7. Keep provider credentials unset until provider selection, current pricing, monthly USD cap, input/output token caps and voice per-request ceilings are explicitly approved.
+8. Deploy only to disposable staging after migration, authentication, rollback and recovery tests pass. Do not create R2 or Durable Objects for the first Alpha unless a tested feature requires them.
 
 ## Data protection rules
 

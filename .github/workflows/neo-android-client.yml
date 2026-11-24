@@ -63,6 +63,14 @@ jobs:
           echo "no" | avdmanager create avd --name neo-api-36 --package "system-images;android-36;google_apis;x86_64" --device "pixel_2"
           test -f "$ANDROID_AVD_HOME/neo-api-36.ini"
           avdmanager list avd
+      - name: Grant the runner user access to KVM
+        run: |
+          if [ ! -e /dev/kvm ]; then
+            echo "::error::KVM device /dev/kvm is unavailable on this runner"
+            exit 1
+          fi
+          sudo chmod 666 /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
       - name: Boot Android emulator
         env:
           ANDROID_AVD_HOME: ${{ runner.temp }}/android-avd

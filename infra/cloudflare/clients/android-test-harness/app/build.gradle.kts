@@ -10,7 +10,7 @@ android {
     compileSdk = 36
     defaultConfig {
         applicationId = "com.neo.client.testharness"
-        minSdk = 23
+        minSdk = 24
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"

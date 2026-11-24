@@ -286,6 +286,27 @@ describe("D1-backed Access and device proof", () => {
       status: "enrolled",
     });
 
+    const repeatEnrolment = await worker.fetch(new Request(baseUrl + "/v1/devices", {
+      method: "POST",
+      headers: {
+        "cf-access-jwt-assertion": token,
+        "content-type": "application/json",
+        "x-neo-device-id": deviceId,
+      },
+      body: JSON.stringify({
+        label: "Browser cookie device",
+        platform: "browser",
+        public_key_jwk: publicJwk,
+        capabilities: ["cpu"],
+      }),
+    }), bindings);
+    expect(repeatEnrolment.status).toBe(200);
+    expect(await repeatEnrolment.json()).toMatchObject({
+      device_id: deviceId,
+      account_id: account,
+      status: "enrolled",
+    });
+
     const rejectedDeviceId = crypto.randomUUID().replace(/-/g, "");
     const fallbackBearer = await accessToken("invalid-assertion-enrolment-" + crypto.randomUUID());
     const rejectedPair = await crypto.subtle.generateKey(

@@ -21,7 +21,7 @@ const messagesNode = $("messages");
 const clearButton = $("clear-button") as HTMLButtonElement;
 let client: NeoDeviceClient | null = null;
 let history: ChatMessage[] = [];
-let busy = false;
+let busy = false;\nlet googleIdToken: string | null = null;\ntype GoogleCredentialResponse = { credential?: string };\ntype GoogleIdentityApi = { initialize(options: { client_id: string; callback(response: GoogleCredentialResponse): void }): void; renderButton(parent: HTMLElement, options: { theme: string; size: string; shape: string; text: string }): void };\ndeclare global { interface Window { google?: { accounts?: { id?: GoogleIdentityApi } } } }
 
 function showError(message: string) {
   errorPanel.textContent = message;
@@ -51,13 +51,16 @@ function addMessage(role: "user" | "assistant", content: string) {
 }
 async function connect() {
   clearError();
-  connectButton.disabled = true;
-  welcomeConnect.disabled = true;
   connectionState.textContent = "Connecting…";
   try {
+    if (!googleIdToken) throw new Error("Sign in with Google first, then connect this browser.");
     const baseUrl = window.location.origin;
-    const account = await NeoDeviceClient.resolveAccountScope(baseUrl);
-    const device = await NeoDeviceClient.create(baseUrl, undefined, account);
+    const identityToken = async () => {
+      if (!googleIdToken) throw new Error("Google sign-in has expired. Sign in again.");
+      return googleIdToken;
+    };
+    const account = await NeoDeviceClient.resolveAccountScope(baseUrl, identityToken);
+    const device = await NeoDeviceClient.create(baseUrl, identityToken, account);
     await device.enrol("NEO Browser", "browser", ["chat", "memory.sync"]);
     await device.heartbeat();
     client = device;
@@ -66,18 +69,46 @@ async function connect() {
     connectionState.textContent = "Not connected";
     connectionState.className = "state state-error";
     const message = error instanceof Error ? error.message : "Connection failed";
-    if (message.includes("401") || message.toLowerCase().includes("session")) {
-      showError("NEO sign-in is required. Open this page through the configured Cloudflare Access application, then try connecting again.");
-    } else {
-      showError(message + " — NEO staging may not be configured or reachable yet.");
-    }
-  } finally {
-    connectButton.disabled = false;
-    welcomeConnect.disabled = false;
+    showError(message + " — NEO staging may not be configured or reachable yet.");
   }
 }
-connectButton.addEventListener("click", connect);
-welcomeConnect.addEventListener("click", connect);
+async function initialiseGoogleSignIn() {
+  try {
+    const response = await fetch("/v1/config", { cache: "no-store" });
+    if (!response.ok) throw new Error("Unable to load NEO sign-in configuration.");
+    const config = await response.json() as { google_web_client_id?: string | null };
+    if (!config.google_web_client_id) {
+      showError("Google sign-in is not configured yet. The NEO owner must add the Google Web OAuth client ID before browser authentication can be tested.");
+      return;
+    }
+    let attempts = 0;
+    const waitForGoogle = () => {
+      const api = window.google?.accounts?.id;
+      if (!api) {
+        if (++attempts < 40) window.setTimeout(waitForGoogle, 100);
+        else showError("Google sign-in could not load. Check the network connection and content blockers.");
+        return;
+      }
+      api.initialize({
+        client_id: config.google_web_client_id!,
+        callback: (credentialResponse: GoogleCredentialResponse) => {
+          if (!credentialResponse.credential) {
+            showError("Google did not return an identity token. Please try signing in again.");
+            return;
+          }
+          googleIdToken = credentialResponse.credential;
+          clearError();
+          void connect();
+        },
+      });
+      api.renderButton(googleButton, { theme: "filled_black", size: "large", shape: "pill", text: "signin_with" });
+      api.renderButton(googleTopButton, { theme: "outline", size: "medium", shape: "pill", text: "signin" });
+    };
+    waitForGoogle();
+  } catch (error) {
+    showError(error instanceof Error ? error.message : "Google sign-in initialisation failed.");
+  }
+}
 form.addEventListener("submit", async event => {
   event.preventDefault();
   const text = input.value.trim();

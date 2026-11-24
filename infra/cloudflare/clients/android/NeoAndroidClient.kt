@@ -92,8 +92,11 @@ class NeoAndroidClient(
         val parsed = java.net.URL(url)
         // URL.host excludes a non-default port; the Worker signs URL.host,
         // which includes that port, so preserve it in the canonical request.
-        val canonicalHost = parsed.host +
-            if (parsed.port != -1 && parsed.port != 443) ":\u0024{parsed.port}" else ""
+        val canonicalHost = if (parsed.port != -1 && parsed.port != 443) {
+            parsed.host + ":" + parsed.port
+        } else {
+            parsed.host
+        }
         val timestamp = System.currentTimeMillis() / 1000
         val nonceBytes = ByteArray(24).also { SecureRandom().nextBytes(it) }
         val nonce = Base64.encodeToString(nonceBytes, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)

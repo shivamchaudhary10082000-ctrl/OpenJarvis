@@ -1,7 +1,7 @@
 export interface Env {
   DB: D1Database;
-  ACCESS_TEAM_DOMAIN: string;
-  ACCESS_AUD: string;
+  ACCESS_TEAM_DOMAIN?: string;
+  ACCESS_AUD?: string;
   GOOGLE_OAUTH_CLIENT_IDS?: string;
   GOOGLE_WEB_CLIENT_ID?: string;
   MODEL_PRIMARY_URL?: string;
@@ -188,7 +188,10 @@ async function accessClaims(token: string, env: Env): Promise<Claims> {
   if (parts.length !== 3) throw new Error("Malformed access token");
   const header = JSON.parse(new TextDecoder().decode(b64u(parts[0]))) as { alg?: string; kid?: string };
   if (header.alg !== "RS256" || !header.kid) throw new Error("Unsupported access token algorithm");
-  const issuer = env.ACCESS_TEAM_DOMAIN.replace(/\/$/, "");
+  const configuredIssuer = env.ACCESS_TEAM_DOMAIN?.trim();
+  const configuredAudience = env.ACCESS_AUD?.trim();
+  if (!configuredIssuer || !configuredAudience) throw new Error("Cloudflare Access fallback is not configured");
+  const issuer = configuredIssuer.replace(/\/$/, "");
   const response = await fetch(issuer + "/cdn-cgi/access/certs");
   if (!response.ok) throw new Error("Unable to validate access issuer");
   const jwks = await response.json() as { keys: Array<JsonWebKey & { kid?: string }> };
@@ -204,7 +207,7 @@ async function accessClaims(token: string, env: Env): Promise<Claims> {
     (Number.isFinite(claims.nbf) && claims.nbf <= currentTime);
   if (
     claims.iss !== issuer ||
-    !aud.includes(env.ACCESS_AUD) ||
+    !aud.includes(configuredAudience) ||
     typeof claims.sub !== "string" ||
     !claims.sub.trim() ||
     !Number.isFinite(claims.exp) ||

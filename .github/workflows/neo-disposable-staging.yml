@@ -1,0 +1,98 @@
+name: NEO disposable staging deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_disposable_staging:
+        description: "I confirm this workflow may migrate and deploy only neo-staging-db / neo-api-disposable-staging."
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: neo-disposable-staging-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-disposable-staging:
+    if: inputs.confirm_disposable_staging == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      NEO_GOOGLE_WEB_CLIENT_ID: ${{ vars.NEO_GOOGLE_WEB_CLIENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate deployment credentials and identity configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Add CLOUDFLARE_API_TOKEN as a GitHub Actions secret."; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::Add CLOUDFLARE_ACCOUNT_ID as a GitHub Actions variable."; exit 1; }
+          test -n "$NEO_GOOGLE_WEB_CLIENT_ID" || { echo "::error::Add NEO_GOOGLE_WEB_CLIENT_ID as a GitHub Actions variable."; exit 1; }
+          [[ "$NEO_GOOGLE_WEB_CLIENT_ID" == *.apps.googleusercontent.com ]] || { echo "::error::The Google Web OAuth client ID format is invalid."; exit 1; }
+
+      - name: Build browser Alpha assets
+        working-directory: infra/cloudflare/clients/web
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Install pinned Wrangler from the NEO Worker package
+        working-directory: infra/cloudflare/worker
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Materialize disposable staging config
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp infra/cloudflare/wrangler.disposable.example.toml infra/cloudflare/wrangler.disposable.toml
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          const path = "infra/cloudflare/wrangler.disposable.toml";
+          const clientId = process.env.NEO_GOOGLE_WEB_CLIENT_ID;
+          let config = fs.readFileSync(path, "utf8");
+          config = config.replaceAll("REPLACE-WITH-GOOGLE-WEB-CLIENT-ID", clientId);
+          if (config.includes("REPLACE-WITH-")) throw new Error("Staging config still contains an unresolved placeholder");
+          if (!config.includes('database_name = "neo-staging-db"') ||
+              !config.includes('database_id = "dd4c03d6-a286-4ac9-abbc-8f162b692acc"') ||
+              !config.includes('name = "neo-api-disposable-staging"')) {
+            throw new Error("Refusing to deploy: disposable NEO resource identity does not match the approved staging target");
+          }
+          fs.writeFileSync(path, config);
+          NODE
+
+      - name: Review remote D1 migration state
+        working-directory: infra/cloudflare/worker
+        run: npx wrangler d1 migrations list neo-staging-db --remote --config ../wrangler.disposable.toml
+
+      - name: Apply checked-in D1 migrations to disposable staging
+        working-directory: infra/cloudflare/worker
+        run: npx wrangler d1 migrations apply neo-staging-db --remote --config ../wrangler.disposable.toml
+
+      - name: Deploy NEO Worker and browser assets to disposable staging
+        working-directory: infra/cloudflare/worker
+        run: npx wrangler deploy --config ../wrangler.disposable.toml
+
+      - name: Verify staging health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://neo-api-disposable-staging.${{ vars.CLOUDFLARE_WORKERS_SUBDOMAIN }}.workers.dev/v1/health"
+          for attempt in {1..12}; do
+            if curl --fail --silent --show-error "$url"; then
+              echo
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::NEO staging health check did not become ready."
+          exit 1

@@ -1,6 +1,6 @@
 # Disposable NEO staging template.
-# This file intentionally contains placeholders and zero spend ceilings.
-# Do not deploy until a dedicated D1 database and Cloudflare Access app exist.
+# Dedicated disposable staging configuration for the owner's NEO D1 database.
+# Access issuer/audience remain placeholders; do not deploy until authentication is provisioned and reviewed.
 name = "neo-api-disposable-staging"
 main = "worker/src/index.ts"
 compatibility_date = "2026-11-20"
@@ -38,6 +38,6 @@ MODEL_BACKUP_URL = ""
 
 [[d1_databases]]
 binding = "DB"
-database_name = "neo-disposable-staging"
-database_id = "REPLACE-WITH-DEDICATED-D1-ID"
+database_name = "neo-staging-db"
+database_id = "dd4c03d6-a286-4ac9-abbc-8f162b692acc"
 migrations_dir = "migrations"

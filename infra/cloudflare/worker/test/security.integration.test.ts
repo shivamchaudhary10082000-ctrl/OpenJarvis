@@ -1048,7 +1048,7 @@ describe("D1 spend ledger invariants", () => {
 describe("Google OIDC identity bootstrap", () => {
   const clientId = "neo-web-test.apps.googleusercontent.com";
   let googleKeys: CryptoKeyPair;
-  let googlePublicJwk: JsonWebKey;
+  let googlePublicJwk: JsonWebKey & { kid?: string; alg?: string; use?: string };
 
   beforeAll(async () => {
     googleKeys = await crypto.subtle.generateKey(

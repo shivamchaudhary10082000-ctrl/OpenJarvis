@@ -14,7 +14,7 @@
     "verbatimModuleSyntax": true,
     "strict": true,
     "noEmit": true,
-    "types": []
+    "types": ["vite/client"]
   },
   "include": [
     "./**/*.ts"

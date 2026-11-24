@@ -46,6 +46,12 @@ jobs:
         with:
           accept-android-sdk-licenses: true
           packages: "platform-tools emulator platforms;android-36 build-tools;36.0.0 system-images;android-36;google_apis;x86_64"
+      # setup-android installs the emulator package but does not add its
+      # directory to PATH on every runner image.
+      - name: Add Android emulator to PATH
+        run: |
+          test -x "$ANDROID_HOME/emulator/emulator"
+          echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
       - uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: "8.13"

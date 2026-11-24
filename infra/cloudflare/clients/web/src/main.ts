@@ -58,11 +58,7 @@ async function connect() {
     const baseUrl = (import.meta.env.VITE_NEO_API_BASE_URL || window.location.origin).replace(/\/$/, "");
     const account = await NeoDeviceClient.resolveAccountScope(baseUrl);
     const device = await NeoDeviceClient.create(baseUrl, undefined, account);
-    const existing = await device.listDevices();
-    const enrolled = existing.devices?.find(item => item.device_id === device.deviceId && item.status === "active");
-    if (!enrolled) {
-      await device.enrol("NEO Browser", "browser", ["chat", "memory.sync"]);
-    }
+    await device.enrol("NEO Browser", "browser", ["chat", "memory.sync"]);
     await device.heartbeat();
     client = device;
     setConnected("Browser device · " + device.deviceId.slice(0, 8));

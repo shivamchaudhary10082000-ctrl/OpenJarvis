@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm_disposable_staging:
-        description: "I confirm this workflow may migrate and deploy only neo-staging-db / neo-api-disposable-staging."
+        description: "I confirm this workflow may deploy only neo-api-disposable-staging. It must not run D1 migrations."
         required: true
         type: boolean
         default: false
@@ -71,14 +71,6 @@ jobs:
           }
           fs.writeFileSync(path, config);
           NODE
-
-      - name: Review remote D1 migration state
-        working-directory: infra/cloudflare/worker
-        run: npx wrangler d1 migrations list neo-staging-db --remote --config ../wrangler.disposable.toml
-
-      - name: Apply checked-in D1 migrations to disposable staging
-        working-directory: infra/cloudflare/worker
-        run: npx wrangler d1 migrations apply neo-staging-db --remote --config ../wrangler.disposable.toml
 
       - name: Deploy NEO Worker and browser assets to disposable staging
         working-directory: infra/cloudflare/worker

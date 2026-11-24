@@ -1,6 +1,15 @@
 name: NEO disposable staging deployment
 
 on:
+  # Allow an explicitly tagged commit on the isolated engineering branch to
+  # perform the first disposable deployment before this workflow reaches main.
+  # Ordinary pushes never deploy; the job also requires the marker below.
+  push:
+    branches:
+      - neo/foundation-architecture
+    paths:
+      - ".github/workflows/neo-disposable-staging.yml"
+      - "infra/cloudflare/**"
   workflow_dispatch:
     inputs:
       confirm_disposable_staging:
@@ -18,7 +27,9 @@ concurrency:
 
 jobs:
   deploy-disposable-staging:
-    if: inputs.confirm_disposable_staging == true
+    if: |
+      (github.event_name == 'workflow_dispatch' && inputs.confirm_disposable_staging == true) ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[neo-staging-deploy]'))
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:

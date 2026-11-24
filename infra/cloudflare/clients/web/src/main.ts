@@ -21,7 +21,11 @@ const messagesNode = $("messages");
 const clearButton = $("clear-button") as HTMLButtonElement;
 let client: NeoDeviceClient | null = null;
 let history: ChatMessage[] = [];
-let busy = false;\nlet googleIdToken: string | null = null;\ntype GoogleCredentialResponse = { credential?: string };\ntype GoogleIdentityApi = { initialize(options: { client_id: string; callback(response: GoogleCredentialResponse): void }): void; renderButton(parent: HTMLElement, options: { theme: string; size: string; shape: string; text: string }): void };\ndeclare global { interface Window { google?: { accounts?: { id?: GoogleIdentityApi } } } }
+let busy = false;
+let googleIdToken: string | null = null;
+type GoogleCredentialResponse = { credential?: string };
+type GoogleIdentityApi = { initialize(options: { client_id: string; callback(response: GoogleCredentialResponse): void }): void; renderButton(parent: HTMLElement, options: { theme: string; size: string; shape: string; text: string }): void };
+declare global { interface Window { google?: { accounts?: { id?: GoogleIdentityApi } } } }
 
 function showError(message: string) {
   errorPanel.textContent = message;

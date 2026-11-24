@@ -25,6 +25,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       NEO_GOOGLE_WEB_CLIENT_ID: ${{ vars.NEO_GOOGLE_WEB_CLIENT_ID }}
+      CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ vars.CLOUDFLARE_WORKERS_SUBDOMAIN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -38,6 +39,7 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Add CLOUDFLARE_API_TOKEN as a GitHub Actions secret."; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::Add CLOUDFLARE_ACCOUNT_ID as a GitHub Actions variable."; exit 1; }
           test -n "$NEO_GOOGLE_WEB_CLIENT_ID" || { echo "::error::Add NEO_GOOGLE_WEB_CLIENT_ID as a GitHub Actions variable."; exit 1; }
+          test -n "$CLOUDFLARE_WORKERS_SUBDOMAIN" || { echo "::error::Add CLOUDFLARE_WORKERS_SUBDOMAIN as a GitHub Actions variable."; exit 1; }
           [[ "$NEO_GOOGLE_WEB_CLIENT_ID" == *.apps.googleusercontent.com ]] || { echo "::error::The Google Web OAuth client ID format is invalid."; exit 1; }
 
       - name: Build browser Alpha assets

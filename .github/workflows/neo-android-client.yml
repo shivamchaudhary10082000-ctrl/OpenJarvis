@@ -55,10 +55,20 @@ jobs:
       - uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: "8.13"
-      - run: echo "no" | avdmanager create avd --name neo-api-36 --package "system-images;android-36;google_apis;x86_64" --device "pixel_2"
+      - name: Create Android virtual device
+        env:
+          ANDROID_AVD_HOME: ${{ runner.temp }}/android-avd
+        run: |
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo "no" | avdmanager create avd --name neo-api-36 --package "system-images;android-36;google_apis;x86_64" --device "pixel_2"
+          test -f "$ANDROID_AVD_HOME/neo-api-36.ini"
+          avdmanager list avd
       - name: Boot Android emulator
+        env:
+          ANDROID_AVD_HOME: ${{ runner.temp }}/android-avd
         run: |
           set -euo pipefail
+          test -f "$ANDROID_AVD_HOME/neo-api-36.ini"
           emulator_log="$RUNNER_TEMP/neo-emulator.log"
           "$ANDROID_HOME/emulator/emulator" -avd neo-api-36 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect >"$emulator_log" 2>&1 &
           emulator_pid=$!

@@ -1,6 +1,6 @@
 # NEO Cloudflare infrastructure scaffold
 
-This directory contains the D1 schema, API contract, Worker source, and starter web/Android device clients. The Worker has a local integration test suite but has **not** been deployed or connected to a Cloudflare account.
+This directory contains the D1 schema, API contract, Worker source, and starter web/Android device clients. The Worker and browser Alpha have been deployed to the disposable staging environment; the remote D1 schema has not yet been migrated or verified.
 
 ## Contract and resources
 
@@ -15,11 +15,11 @@ Intended resources:
 
 ## Staging resource status
 
-A dedicated Cloudflare D1 database has been created for NEO staging:
+A dedicated Cloudflare D1 database has been created for NEO staging. The Worker deployment is verified, but the remote database migration state and authenticated data paths remain unverified:
 - Database name: `neo-staging-db`
 - Database ID: `dd4c03d6-a286-4ac9-abbc-8f162b692acc`
 
-The disposable Wrangler template `wrangler.disposable.example.toml` is bound to this database. The database is not yet migrated or connected to a deployed Worker. Do not create tables manually; apply the checked-in migrations in order after authentication and deployment prerequisites are satisfied.
+The disposable Wrangler template `wrangler.disposable.example.toml` is bound to this database. Do not create tables manually; apply the checked-in migrations in order after authentication and deployment prerequisites are satisfied.
 
 ## Before deployment
 
@@ -27,7 +27,7 @@ The disposable Wrangler template `wrangler.disposable.example.toml` is bound to 
 2. Provision and review a secure account identity/authentication method. The current Worker requires a verified Cloudflare Access JWT for session bootstrap and first device enrolment; device signatures alone do not establish the initial account identity. Do not bypass this requirement or expose unauthenticated enrolment.
 3. If Cloudflare Access Free onboarding requires card authorization, stop and choose a separately reviewed authentication design before deployment. Do not deploy the current Worker with placeholder issuer/audience values.
 4. Decide account identity, recovery and deletion behavior.
-5. Apply migrations 0001_neo_core.sql through 0008_provider_token_budgets.sql in order using Wrangler after verifying the disposable D1 binding.
+5. Review `D1_STAGING_RUNBOOK.md`, verify the exact disposable D1 binding, capture a pre-migration Time Travel bookmark and SQL export, and obtain explicit approval before applying migrations 0001–0009 interactively. Never use an account-wide D1 Edit token.
 6. Configure Access and provider secrets only through Wrangler/Cloudflare secret storage.
 7. Keep provider credentials unset until provider selection, current pricing, monthly USD cap, input/output token caps and voice per-request ceilings are explicitly approved.
 8. Deploy only to disposable staging after migration, authentication, rollback and recovery tests pass. Do not create R2 or Durable Objects for the first Alpha unless a tested feature requires them.
@@ -57,7 +57,7 @@ The Worker now supports Google ID-token verification for session bootstrap, firs
 
 ## Disposable staging deployment workflow
 
-The manual GitHub Actions workflow `.github/workflows/neo-disposable-staging.yml` builds the browser app, lists and applies the checked-in migrations only to `neo-staging-db`, deploys only `neo-api-disposable-staging`, and checks its `/v1/health` endpoint. It requires the workflow_dispatch confirmation checkbox. Before using it, configure these GitHub Actions values:
+The GitHub Actions workflow `.github/workflows/neo-disposable-staging.yml` builds the browser app, deploys only `neo-api-disposable-staging`, and checks its `/v1/health` endpoint. It does **not** apply D1 migrations. Migration application is a separate, manually approved operation described in `D1_STAGING_RUNBOOK.md`. Before using it, configure these GitHub Actions values:
 
 - Secret `CLOUDFLARE_API_TOKEN`: an account-scoped API token; never paste it into chat or commit it.
 - Variables `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_WORKERS_SUBDOMAIN`, and `NEO_GOOGLE_WEB_CLIENT_ID`.

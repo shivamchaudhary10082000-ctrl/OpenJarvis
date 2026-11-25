@@ -24,7 +24,7 @@ let history: ChatMessage[] = [];
 let busy = false;
 let googleIdToken: string | null = null;
 type GoogleCredentialResponse = { credential?: string };
-type GoogleIdentityApi = { initialize(options: { client_id: string; callback(response: GoogleCredentialResponse): void }): void; renderButton(parent: HTMLElement, options: { theme: string; size: string; shape: string; text: string }): void };
+type GoogleIdentityApi = { initialize(options: { client_id: string; nonce: string; callback(response: GoogleCredentialResponse): void }): void; renderButton(parent: HTMLElement, options: { theme: string; size: string; shape: string; text: string }): void };
 declare global { interface Window { google?: { accounts?: { id?: GoogleIdentityApi } } } }
 
 function showError(message: string) {
@@ -85,6 +85,12 @@ async function initialiseGoogleSignIn() {
       showError("Google sign-in is not configured yet. The NEO owner must add the Google Web OAuth client ID before browser authentication can be tested.");
       return;
     }
+    const challengeResponse = await fetch("/v1/auth/challenge", { cache: "no-store" });
+    if (!challengeResponse.ok) throw new Error("NEO could not create a one-time Google sign-in challenge.");
+    const challenge = await challengeResponse.json() as { nonce?: string };
+    if (typeof challenge.nonce !== "string" || challenge.nonce.length < 32) {
+      throw new Error("NEO returned an invalid Google sign-in challenge.");
+    }
     let attempts = 0;
     const waitForGoogle = () => {
       const api = window.google?.accounts?.id;
@@ -95,6 +101,7 @@ async function initialiseGoogleSignIn() {
       }
       api.initialize({
         client_id: config.google_web_client_id!,
+        nonce: challenge.nonce,
         callback: (credentialResponse: GoogleCredentialResponse) => {
           if (!credentialResponse.credential) {
             showError("Google did not return an identity token. Please try signing in again.");

@@ -1,6 +1,6 @@
 # NEO Cloudflare Worker
 
-This is the executable NEO API gateway implementation. It is deployed only to the disposable staging Worker; the remote D1 schema and authenticated data paths are not yet verified, so it is **not production-ready**.
+This is the executable NEO API gateway implementation. A previous Worker version is deployed to the disposable staging Worker; the latest branch code is not yet deployed. The remote D1 schema and authenticated data paths are not yet verified, so it is **not production-ready**.
 
 ## Implemented routes and controls
 
@@ -34,7 +34,7 @@ Voice requests require VOICE_TRANSCRIBE_MAX_COST_USD_MICROS or VOICE_SYNTHESIS_M
 
 Run npm install, Redocly OpenAPI lint, npm run check, npm run deploy:dry-run and npm test.
 
-Vitest runs in the Cloudflare Workers runtime with local SQLite-backed D1 and applies the checked-in migrations 0001–0010. Latest pre-fix verified run #208 passed 66 Worker tests and the native browser persistence matrix 9/9; the cumulative token-budget regression in migration 0009 and OIDC nonce challenge migration 0010 are awaiting fresh CI verification. Local integration evidence is not remote D1 or staging proof.
+Vitest runs in the Cloudflare Workers runtime with local SQLite-backed D1 and applies migrations 0001–0010. Verified code run #229 passed 70 Worker tests and 9/9 Playwright browser persistence tests. On the current branch head, Redocly OpenAPI lint, TypeScript check, Wrangler deploy dry-run and all 70 Worker tests have passed; the fresh Playwright matrix is still running. Local integration evidence is not remote D1 or staging proof.
 
 ## Offline clients
 
@@ -47,13 +47,13 @@ The Android transport/storage primitive and a diagnostic Gradle harness now exis
 
 ## Staging checklist
 
-1. Create Cloudflare Access application; set team issuer domain and audience.
-2. Create staging D1 and replace the placeholder database ID.
-3. Review `../D1_STAGING_RUNBOOK.md`; apply migrations 0001–0009 only after a verified backup and explicit owner approval; verify the migration list.
-4. Keep provider secrets unset initially. Verify auth, revocation, memory, task and rate-limit flows.
-5. Configure a low owner-approved spend/token cap and reviewed provider prices only after choosing a provider/model.
-6. Test real provider failover and voice billing with sandbox credentials and hard caps.
-7. Rehearse rollback, backup/restore, deletion propagation and reservation reconciliation.
-8. Deploy to staging only after those gates; production remains out of scope.
+1. Verify the Google Web OAuth client ID, allowed audience and test-user configuration. Cloudflare Access is an optional fallback, not a prerequisite for Google sign-in.
+2. Confirm the existing disposable D1 identity is exactly `neo-staging-db` / `dd4c03d6-a286-4ac9-abbc-8f162b692acc`.
+3. Create a separate Developer Platform Editor token scoped only to that D1 resource. Follow `../D1_STAGING_RUNBOOK.md`; run preflight first, then apply migrations 0001–0010 only after explicit owner approval.
+4. Verify the remote migration list, tables, indexes and triggers. Keep scheduled maintenance disabled until schema verification is complete.
+5. Deploy the latest Worker/browser assets to disposable staging using the separate Worker-only deployment token. Test Google sign-in, one-time challenge/replay rejection, device enrolment, authenticated APIs and revocation.
+6. Keep provider secrets unset and budgets at zero until a provider/model, current pricing and hard monthly/input/output limits are explicitly approved.
+7. After approval, test real provider usage, failover and settlement with the hard caps enabled.
+8. Test browser/Android device pairing, encrypted memory synchronisation, offline recovery and physical-device behavior. Production remains out of scope.
 
 Never commit API keys, Access tokens, private device keys or memory encryption keys.

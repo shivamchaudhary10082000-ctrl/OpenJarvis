@@ -5,7 +5,7 @@ This is the executable NEO API gateway implementation. It is deployed only to th
 ## Implemented routes and controls
 
 - Google OIDC ID-token verification (RS256, issuer, audience, expiry) for browser/native identity bootstrap and first-device enrolment; optional Cloudflare Access JWT fallback; account/device binding.
-- Important auth limitation: Google ID tokens are not yet bound to a server-issued one-time nonce/challenge. Complete challenge/replay hardening before treating first-device enrollment as production-safe.
+- Google first-device enrolment now requires a server-issued, ten-minute, one-time nonce challenge; the Worker stores only the challenge hash, rate-limits challenge creation and atomically consumes it. Subsequent API calls require the enrolled P-256 device signature and request nonce.
 - First-device and additional-device enrolment using a client-generated P-256 public key.
 - Signed device requests with a five-minute timestamp window and one-use nonce replay protection.
 - Device listing, online freshness indicator, authenticated heartbeat and immediate revocation; scheduled cleanup removes expired nonce replay records every 15 minutes.
@@ -34,7 +34,7 @@ Voice requests require VOICE_TRANSCRIBE_MAX_COST_USD_MICROS or VOICE_SYNTHESIS_M
 
 Run npm install, Redocly OpenAPI lint, npm run check, npm run deploy:dry-run and npm test.
 
-Vitest runs in the Cloudflare Workers runtime with local SQLite-backed D1 and applies the checked-in migrations 0001–0009. Latest pre-fix verified run #208 passed 66 Worker tests and the native browser persistence matrix 9/9; the cumulative token-budget regression in migration 0009 is awaiting fresh CI verification. Local integration evidence is not remote D1 or staging proof.
+Vitest runs in the Cloudflare Workers runtime with local SQLite-backed D1 and applies the checked-in migrations 0001–0010. Latest pre-fix verified run #208 passed 66 Worker tests and the native browser persistence matrix 9/9; the cumulative token-budget regression in migration 0009 and OIDC nonce challenge migration 0010 are awaiting fresh CI verification. Local integration evidence is not remote D1 or staging proof.
 
 ## Offline clients
 

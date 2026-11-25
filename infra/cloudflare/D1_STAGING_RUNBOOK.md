@@ -77,14 +77,15 @@ NODE
 
 ## Mobile-friendly migration workflow
 
-A dedicated, manually dispatched workflow is available at `.github/workflows/neo-d1-staging-migrations.yml`. It never deploys the Worker.
+A push-triggered, approval-gated workflow is available at `.github/workflows/neo-d1-staging-migrations.yml`. It never deploys the Worker. The approval file is `infra/cloudflare/D1_MIGRATION_APPROVAL.txt`, initially set to `NO`.
 
 1. Add `CLOUDFLARE_D1_MIGRATION_TOKEN` as a GitHub Actions secret. It must be a separate token with Developer Platform **Editor** role scoped to the single `neo-staging-db` D1 resource.
-2. Open GitHub Actions → **NEO disposable D1 migration preflight and apply** → Run workflow on `neo/foundation-architecture`.
-3. Leave `apply_migrations` unchecked for the first run. This verifies the database identity, records a Time Travel bookmark, exports a SQL backup and lists migration state; it does not change the schema. The backup artifact is private to the repository and retained for one day.
-4. Inspect the workflow summary, download and safely retain the backup, and review the pending migration list.
-5. Only after explicit owner approval, run the workflow again with `apply_migrations` checked. This is the explicit apply authorization. It applies only the checked-in migrations 0001–0010 to the hard-coded staging database UUID, then verifies critical tables and triggers.
-6. After successful migration, revoke the temporary D1 migration token or remove its GitHub secret. Keep the existing Worker-only deployment token separate.
+2. For preflight only, edit `D1_MIGRATION_APPROVAL.txt` to `PREFLIGHT_ONLY` and commit to `neo/foundation-architecture` with `[neo-d1-preflight]` in the commit message. This verifies database identity, records a Time Travel bookmark, exports a SQL backup and lists migration state; it does not change the schema.
+3. Inspect the workflow summary, download and safely retain the private backup artifact (one-day retention), and review the pending migration list.
+4. Only after explicit owner approval, edit the file to `APPLY_0001_0010` and commit to the same branch with `[neo-d1-apply]` in the commit message. That exact file value plus commit marker is the explicit apply authorization. It applies only the checked-in migrations 0001–0010 to the hard-coded staging database UUID, then verifies critical tables and triggers.
+5. After successful migration, reset the approval file to `NO`, revoke the temporary D1 migration token and remove its GitHub secret. Keep the existing Worker-only deployment token separate.
+
+The workflow only runs on the engineering branch when the approval file changes and the commit marker matches the file contents. Ordinary pushes, a default `NO` value, or a mismatched marker cannot apply migrations.
 
 The workflow fails closed if the branch, migration file set, database UUID, config placeholders or expected schema objects do not match. The non-interactive Wrangler confirmation is skipped in CI, so the `apply_migrations` boolean is the explicit owner confirmation. Cloudflare captures a backup after migration application and rolls back a failed migration, leaving the previous successful migration applied.
 

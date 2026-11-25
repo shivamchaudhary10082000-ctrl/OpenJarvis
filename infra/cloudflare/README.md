@@ -24,11 +24,11 @@ The disposable Wrangler template `wrangler.disposable.example.toml` is bound to 
 ## Before deployment
 
 1. Confirm the account's billing posture; do not enter payment details or start a paid Zero Trust plan just to unblock this project.
-2. Provision and review a secure account identity/authentication method. The current Worker requires a verified Cloudflare Access JWT for session bootstrap and first device enrolment; device signatures alone do not establish the initial account identity. Do not bypass this requirement or expose unauthenticated enrolment.
-3. If Cloudflare Access Free onboarding requires card authorization, stop and choose a separately reviewed authentication design before deployment. Do not deploy the current Worker with placeholder issuer/audience values.
+2. Review the Google OIDC sign-in flow and its token lifecycle. The Worker currently verifies Google ID-token signatures and claims for session bootstrap and first-device enrolment, then requires a device signature for subsequent API requests. A server-issued one-time OIDC nonce/challenge is not yet implemented; treat Google sign-in as staging-only until that replay-hardening work is complete. Cloudflare Access JWT verification is an optional migration fallback, not a requirement for the Google flow.
+3. Keep Cloudflare Access issuer/audience unset unless the optional Access fallback is deliberately configured and reviewed. Never deploy with placeholder identity configuration.
 4. Decide account identity, recovery and deletion behavior.
 5. Review `D1_STAGING_RUNBOOK.md`, verify the exact disposable D1 binding, capture a pre-migration Time Travel bookmark and SQL export, and obtain explicit approval before applying migrations 0001–0009 interactively. Never use an account-wide D1 Edit token.
-6. Configure Access and provider secrets only through Wrangler/Cloudflare secret storage.
+6. Configure optional Access and provider secrets only through Wrangler/Cloudflare secret storage.
 7. Keep provider credentials unset until provider selection, current pricing, monthly USD cap, input/output token caps and voice per-request ceilings are explicitly approved.
 8. Deploy only to disposable staging after migration, authentication, rollback and recovery tests pass. Do not create R2 or Durable Objects for the first Alpha unless a tested feature requires them.
 

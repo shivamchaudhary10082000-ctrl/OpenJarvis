@@ -176,7 +176,7 @@ jobs:
         run: npx wrangler d1 migrations apply neo-staging-db --remote --config ../wrangler.disposable.toml
 
       - name: Verify final migration state and critical schema objects
-        if: inputs.apply_migrations == true
+        if: steps.approval.outputs.apply == 'true'
         working-directory: infra/cloudflare/worker
         shell: bash
         run: |

@@ -75,23 +75,34 @@ NODE
 
 7. Confirm the database is the disposable target, inspect the unapplied migration list, and obtain explicit owner approval before applying.
 
-## Apply
+## Mobile-friendly migration workflow
 
-Only after the preflight, backup and explicit owner approval:
+A dedicated, manually dispatched workflow is available at `.github/workflows/neo-d1-staging-migrations.yml`. It never deploys the Worker.
+
+1. Add `CLOUDFLARE_D1_MIGRATION_TOKEN` as a GitHub Actions secret. It must be a separate token with Developer Platform **Editor** role scoped to the single `neo-staging-db` D1 resource.
+2. Open GitHub Actions → **NEO disposable D1 migration preflight and apply** → Run workflow on `neo/foundation-architecture`.
+3. Leave `apply_migrations` unchecked for the first run. This verifies the database identity, records a Time Travel bookmark, exports a SQL backup and lists migration state; it does not change the schema. The backup artifact is private to the repository and retained for one day.
+4. Inspect the workflow summary, download and safely retain the backup, and review the pending migration list.
+5. Only after explicit owner approval, run the workflow again with `apply_migrations` checked. This is the explicit apply authorization. It applies only the checked-in migrations 0001–0010 to the hard-coded staging database UUID, then verifies critical tables and triggers.
+6. After successful migration, revoke the temporary D1 migration token or remove its GitHub secret. Keep the existing Worker-only deployment token separate.
+
+The workflow fails closed if the branch, migration file set, database UUID, config placeholders or expected schema objects do not match. The non-interactive Wrangler confirmation is skipped in CI, so the `apply_migrations` boolean is the explicit owner confirmation. Cloudflare captures a backup after migration application and rolls back a failed migration, leaving the previous successful migration applied.
+
+## Manual CLI alternative
+
+If using a controlled workstation instead, only after the preflight, backup and explicit owner approval:
 
 ```sh
 npx wrangler d1 migrations apply neo-staging-db --remote --config ../wrangler.disposable.toml
 ```
 
-Run this interactively from a controlled workstation. Do not place a broad D1 credential in GitHub Actions and do not rely on a non-interactive workflow for the first migration. Wrangler prompts for confirmation interactively; in CI the confirmation is skipped. Cloudflare states that a backup is captured after migrations apply and a failed migration is rolled back, leaving the previous successful migration applied.
-
-Immediately afterwards, list migrations again and run read-only schema checks for the expected tables, columns, indexes and triggers. Then run authenticated integration smoke tests against staging.
+Wrangler prompts for confirmation interactively. Immediately afterwards, list migrations again and run read-only schema checks for the expected tables, columns, indexes and triggers. Then run authenticated integration smoke tests against staging.
 
 ## Permission decision
 
-Prefer an account-owned API token with D1 Editor scoped to the single `neo-staging-db` resource, if the Cloudflare token/Developer Platform permission UI explicitly offers that exact resource scope. The UI must identify this database by name or UUID; a generic D1 Edit permission scoped to the entire account or all D1 databases is not acceptable for this project.
+Use an Account API token with the Cloudflare Developer Platform **Editor** role and set the scope to **Resource → D1 → neo-staging-db** (verify the displayed database name/UUID). Cloudflare's current Developer Platform permission model supports platform-, product- and resource-level scopes; choose the single D1 resource, not all D1 databases or the whole Developer Platform.
 
-If the available UI only offers account-wide or product-wide D1 Edit, stop. Do not create that token. The safe fallback is to isolate NEO staging in a separate Cloudflare account containing no production databases, then issue the migration credential only within that isolated account. Do not substitute a global API key, an administrator token, or the existing Worker-only deployment token.
+The previous classic custom-token screen may show only generic D1 Edit. Do not use that account-wide permission. If the current Developer Platform role UI does not offer the exact `neo-staging-db` resource, stop and use an isolated Cloudflare account containing no production databases. Do not substitute a global API key, an administrator token, or the existing Worker-only deployment token.
 
 ## Recovery
 

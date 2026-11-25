@@ -341,16 +341,16 @@ async function route(req: Request, env: Env): Promise<Response> {
       const timestamp = now();
       await env.DB.prepare("DELETE FROM oidc_login_challenges WHERE expires_at <= ?").bind(timestamp).run();
       const requesterHash = await sha256Hex(req.headers.get("cf-connecting-ip") || "unknown");
-      const recent = await env.DB.prepare(
-        "SELECT COUNT(*) AS count FROM oidc_login_challenges WHERE requester_hash=? AND created_at>?",
-      ).bind(requesterHash, timestamp - 60).first<{ count: number }>();
-      if (Number(recent?.count || 0) >= 10) return fail(429, "challenge_rate_limited", "Too many sign-in challenges; wait one minute and retry");
       const nonce = encodeBytesBase64Url(crypto.getRandomValues(new Uint8Array(32)));
       await env.DB.prepare(
         "INSERT INTO oidc_login_challenges(challenge_hash,requester_hash,created_at,expires_at) VALUES(?,?,?,?)",
       ).bind(await sha256Hex(nonce), requesterHash, timestamp, timestamp + 600).run();
       return json({ nonce, expires_at: timestamp + 600 });
-    } catch {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("oidc_challenge_rate_limited")) {
+        return fail(429, "challenge_rate_limited", "Too many sign-in challenges; wait one minute and retry");
+      }
       return fail(503, "challenge_unavailable", "A sign-in challenge could not be created");
     }
   }

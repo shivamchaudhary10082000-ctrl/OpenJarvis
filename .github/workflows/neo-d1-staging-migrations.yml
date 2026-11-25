@@ -158,14 +158,6 @@ jobs:
           npx wrangler d1 export neo-staging-db --remote --output=/tmp/neo-staging-pre-migration.sql --config ../wrangler.disposable.toml
           test -s /tmp/neo-staging-pre-migration.sql
 
-      - name: Upload private pre-migration backup (1-day retention)
-        uses: actions/upload-artifact@v4
-        with:
-          name: neo-staging-pre-migration-backup
-          path: /tmp/neo-staging-pre-migration.sql
-          retention-days: 1
-          if-no-files-found: error
-
       - name: Show current remote migration state
         working-directory: infra/cloudflare/worker
         run: npx wrangler d1 migrations list neo-staging-db --remote --config ../wrangler.disposable.toml

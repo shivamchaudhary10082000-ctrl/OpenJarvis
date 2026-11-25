@@ -88,7 +88,8 @@ async function initialiseGoogleSignIn() {
     const challengeResponse = await fetch("/v1/auth/challenge", { cache: "no-store" });
     if (!challengeResponse.ok) throw new Error("NEO could not create a one-time Google sign-in challenge.");
     const challenge = await challengeResponse.json() as { nonce?: string };
-    if (typeof challenge.nonce !== "string" || challenge.nonce.length < 32) {
+    const loginNonce = challenge.nonce;
+    if (typeof loginNonce !== "string" || loginNonce.length < 32) {
       throw new Error("NEO returned an invalid Google sign-in challenge.");
     }
     let attempts = 0;
@@ -101,7 +102,7 @@ async function initialiseGoogleSignIn() {
       }
       api.initialize({
         client_id: config.google_web_client_id!,
-        nonce: challenge.nonce,
+        nonce: loginNonce,
         callback: (credentialResponse: GoogleCredentialResponse) => {
           if (!credentialResponse.credential) {
             showError("Google did not return an identity token. Please try signing in again.");

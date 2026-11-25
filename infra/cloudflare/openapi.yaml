@@ -6,16 +6,19 @@ info:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0.html
   description: >
-    Implemented v0 contract for the cloud-first NEO gateway. All payloads containing
-    memory or task content are client-encrypted. This contract describes the
-    source-level Worker API and is not deployed. Authenticated requests are rate-limited per account.
+    Implemented v0 contract for the cloud-first NEO gateway. Memory and task payloads
+    are client-encrypted. Google OIDC ID tokens or an optional Cloudflare Access
+    assertion establish account identity; first Google device enrolment requires
+    a short-lived, one-time server nonce. Device-authenticated routes also require
+    P-256 signatures and one-use request nonces. This API is deployed only to
+    disposable staging; remote D1 migrations and production readiness remain pending.
 servers:
   - url: https://{workerHost}/v1
     variables:
       workerHost:
         default: neo-staging.example.workers.dev
 security:
-  - cloudflareAccess: []
+  - neoIdentityBearer: []
   - cloudflareAccessAssertion: []
 paths:
   /health:
@@ -36,14 +39,55 @@ paths:
                 properties:
                   status:
                     const: ok
+  /config:
+    get:
+      operationId: getPublicClientConfig
+      security: []
+      summary: Return public browser authentication configuration
+      responses:
+        "200":
+          description: Public browser configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [google_web_client_id]
+                properties:
+                  google_web_client_id:
+                    type: [string, "null"]
+  /auth/challenge:
+    get:
+      operationId: createOidcLoginChallenge
+      security: []
+      summary: Create a short-lived, one-time Google OIDC nonce
+      description: Returns a ten-minute nonce for the Google ID-token request. The Worker stores only its hash, limits issuance per requester IP, and atomically consumes it on first-device enrollment. A challenge cannot be reused.
+      responses:
+        "200":
+          description: One-time Google OIDC challenge
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nonce, expires_at]
+                properties:
+                  nonce:
+                    type: string
+                    minLength: 40
+                    maxLength: 64
+                  expires_at:
+                    type: integer
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          description: Challenge service unavailable
   /session:
     get:
       operationId: getSessionIdentity
       summary: Resolve the authenticated account subject for browser storage bootstrap
-      description: Returns only the verified Cloudflare Access subject. No device proof is required before first enrolment. The response is not cacheable.
+      description: Returns only the verified Google OIDC or Cloudflare Access account subject. No device proof is required before first enrolment. The response is not cacheable.
       responses:
         "200":
-          description: Verified account scope for the signed-in Access session
+          description: Verified account scope for the signed-in identity session
           content:
             application/json:
               schema:
@@ -82,6 +126,7 @@ paths:
     post:
       operationId: enrolDevice
       summary: Enrol a device public key
+      description: First Google-backed device enrolment requires the one-time nonce from GET /auth/challenge to be present in the signed Google ID token. Replays are rejected.
       parameters:
         - $ref: "#/components/parameters/DeviceId"
       requestBody:
@@ -558,11 +603,11 @@ paths:
 
 components:
   securitySchemes:
-    cloudflareAccess:
+    neoIdentityBearer:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Cloudflare Access JWT for native or controlled clients; Worker verifies issuer, signature, audience, and expiry.
+      description: Google OIDC ID token, or a configured Cloudflare Access JWT fallback. Worker verifies issuer, signature, audience, and expiry.
     cloudflareAccessAssertion:
       type: apiKey
       in: header
@@ -607,7 +652,7 @@ components:
               error:
                 type: string
     Unauthorized:
-      description: Access JWT or device proof is invalid, expired or revoked.
+      description: Identity token or device proof is invalid, expired or revoked.
     RateLimited:
       description: Per-account request limit or budget limit reached.
   schemas:

@@ -151,18 +151,20 @@ jobs:
           test -n "$NEO_GOOGLE_WEB_CLIENT_ID" || {
             echo "::error::NEO_GOOGLE_WEB_CLIENT_ID repository variable is missing."; exit 1;
           }
-          actual="$(find infra/cloudflare/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\\n' | sort)"
-          expected="$(printf '%s\\n' \\
-            0001_neo_core.sql \\
-            0002_device_request_nonces.sql \\
-            0003_task_capabilities.sql \\
-            0004_api_rate_limits.sql \\
-            0005_provider_spend_limits.sql \\
-            0006_provider_spend_settlement_guard.sql \\
-            0007_offline_idempotency.sql \\
-            0008_provider_token_budgets.sql \\
-            0009_enforce_settled_token_budgets.sql \\
-            0010_oidc_login_challenges.sql)"
+          actual="$(find infra/cloudflare/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort)"
+          expected="$(cat <<'EOF'
+          0001_neo_core.sql
+          0002_device_request_nonces.sql
+          0003_task_capabilities.sql
+          0004_api_rate_limits.sql
+          0005_provider_spend_limits.sql
+          0006_provider_spend_settlement_guard.sql
+          0007_offline_idempotency.sql
+          0008_provider_token_budgets.sql
+          0009_enforce_settled_token_budgets.sql
+          0010_oidc_login_challenges.sql
+          EOF
+          )"
           test "$actual" = "$expected" || {
             echo "::error::The checked-in migration set differs from the reviewed 0001–0010 set. Stop and review."; exit 1;
           }
@@ -189,7 +191,7 @@ jobs:
           ]) {
             if (!config.includes(required)) throw new Error("Disposable config identity mismatch: " + required);
           }
-          if (config.includes("REPLACE-WITH-") || /\\[triggers\\]/i.test(config)) {
+          if (config.includes("REPLACE-WITH-") || config.includes("[triggers]")) {
             throw new Error("Unresolved placeholder or scheduled trigger found in disposable config");
           }
           fs.writeFileSync(path, config);
@@ -231,8 +233,9 @@ jobs:
           visit(value);
           if (!bookmarks.length) throw new Error("No D1 Time Travel bookmark was returned");
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
-            "### NEO disposable D1 preflight\\n\\n- Database: `neo-staging-db`\\n- Database ID: `" + process.env.EXPECTED_D1_ID +
-            "`\\n- Pre-migration bookmark: `" + bookmarks[0] + "`\\n");
+            ["### NEO disposable D1 preflight", "", "- Database: `neo-staging-db`",
+             "- Database ID: `" + process.env.EXPECTED_D1_ID + "`",
+             "- Pre-migration bookmark: `" + bookmarks[0] + "`", ""].join(String.fromCharCode(10)));
           NODE
 
       - name: Export pre-migration SQL backup to ephemeral runner
@@ -258,17 +261,13 @@ jobs:
         run: |
           set -euo pipefail
           npx wrangler d1 migrations list neo-staging-db --remote --config ../wrangler.disposable.toml
-          npx wrangler d1 execute neo-staging-db --remote --json \\
-            --command "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('accounts','devices','memory_records','task_leases','provider_spend_usage','oidc_login_challenges') ORDER BY name" \\
-            --config ../wrangler.disposable.toml > /tmp/neo-d1-schema.json
+          npx wrangler d1 execute neo-staging-db --remote --json --command "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('accounts','devices','memory_records','task_leases','provider_spend_usage','oidc_login_challenges') ORDER BY name" --config ../wrangler.disposable.toml > /tmp/neo-d1-schema.json
           for name in accounts devices memory_records task_leases provider_spend_usage oidc_login_challenges; do
             grep -q "$name" /tmp/neo-d1-schema.json || {
               echo "::error::Expected D1 table missing after migration: $name"; exit 1;
             }
           done
-          npx wrangler d1 execute neo-staging-db --remote --json \\
-            --command "SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('provider_token_budget_reserve_before_insert','oidc_login_challenge_rate_limit')" \\
-            --config ../wrangler.disposable.toml > /tmp/neo-d1-triggers.json
+          npx wrangler d1 execute neo-staging-db --remote --json --command "SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('provider_token_budget_reserve_before_insert','oidc_login_challenge_rate_limit')" --config ../wrangler.disposable.toml > /tmp/neo-d1-triggers.json
           grep -q "provider_token_budget_reserve_before_insert" /tmp/neo-d1-triggers.json
           grep -q "oidc_login_challenge_rate_limit" /tmp/neo-d1-triggers.json
           echo "### D1 migrations applied and critical schema verified" >> "$GITHUB_STEP_SUMMARY"

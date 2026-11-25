@@ -27,26 +27,42 @@ Migration 0009 fixes a correctness gap in 0008: token reservation checks must co
 
 ## Required preflight
 
-Run from `infra/cloudflare/worker` using the pinned Wrangler dependency:
+Run from `infra/cloudflare/worker` using the pinned Wrangler dependency.
+
+First materialize the disposable-only config. The generated file is ignored by Git and must never be committed:
+
+```sh
+cp ../wrangler.disposable.example.toml ../wrangler.disposable.toml
+export NEO_GOOGLE_WEB_CLIENT_ID="your public Google Web OAuth client ID"
+node --input-type=module <<'NODE'
+import fs from "node:fs";
+const path = "../wrangler.disposable.toml";
+const clientId = process.env.NEO_GOOGLE_WEB_CLIENT_ID;
+if (!clientId?.endsWith(".apps.googleusercontent.com")) throw new Error("Invalid Google Web client ID");
+const config = fs.readFileSync(path, "utf8").replaceAll("REPLACE-WITH-GOOGLE-WEB-CLIENT-ID", clientId);
+if (config.includes("REPLACE-WITH-")) throw new Error("Unresolved placeholder");
+fs.writeFileSync(path, config);
+NODE
+```
 
 1. Verify the active branch and review the exact migration files being applied.
 2. Inspect `../wrangler.disposable.toml` and verify the Worker name, database name and database UUID above. Stop if any value differs.
 3. Query database identity and status:
 
    ```sh
-   npx wrangler d1 info neo-staging-db --json
+   npx wrangler d1 info neo-staging-db --json --config ../wrangler.disposable.toml
    ```
 
 4. Capture the current Time Travel bookmark and save it outside the repository:
 
    ```sh
-   npx wrangler d1 time-travel info neo-staging-db --json
+   npx wrangler d1 time-travel info neo-staging-db --json --config ../wrangler.disposable.toml
    ```
 
 5. Export a SQL backup to a private, access-controlled location outside Git and CI artifacts:
 
    ```sh
-   npx wrangler d1 export neo-staging-db --remote --output=/secure/path/neo-staging-pre-migration.sql
+   npx wrangler d1 export neo-staging-db --remote --output=/secure/path/neo-staging-pre-migration.sql --config ../wrangler.disposable.toml
    ```
 
    Treat this export as sensitive data. Cloudflare documents that D1 export requires D1 Write permission because export locks the database while it runs.

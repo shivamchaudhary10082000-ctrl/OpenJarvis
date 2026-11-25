@@ -25,7 +25,7 @@ export interface Env {
   VOICE_TRANSCRIBE_MAX_COST_USD_MICROS?: string;
   VOICE_SYNTHESIS_MAX_COST_USD_MICROS?: string;
 }
-type Claims = { sub: string; iss: string; aud: string | string[]; exp: number; nbf?: number; email?: string };
+type Claims = { sub: string; iss: string; aud: string | string[]; exp: number; nbf?: number; email?: string; nonce?: string };
 type Device = { device_id: string; account_id: string; public_key_jwk: string; revoked_at: number | null };
 const json = (data: unknown, status = 200, headers: HeadersInit = {}) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...headers } });
@@ -267,6 +267,16 @@ async function identityClaimsFromRequest(req: Request, env: Env): Promise<Claims
   }
   return accessClaims(token, env);
 }
+
+async function consumeGoogleLoginChallenge(claims: Claims, env: Env): Promise<boolean> {
+  if (claims.iss !== "https://accounts.google.com" && claims.iss !== "accounts.google.com") return true;
+  if (typeof claims.nonce !== "string" || claims.nonce.length < 32 || claims.nonce.length > 128) return false;
+  const timestamp = now();
+  const result = await env.DB.prepare(
+    "UPDATE oidc_login_challenges SET consumed_at=? WHERE challenge_hash=? AND expires_at>? AND consumed_at IS NULL",
+  ).bind(timestamp, await sha256Hex(claims.nonce), timestamp).run();
+  return result.meta.changes === 1;
+}
 async function authenticate(req: Request, env: Env): Promise<{ account: string; device: Device }> {
   // Browser assertions and native/controlled bearer tokens share the exact
   // same RS256, issuer, audience and expiry validation.
@@ -326,10 +336,26 @@ async function route(req: Request, env: Env): Promise<Response> {
   const path = url.pathname.replace(/^\/v1/, "") || "/";
   if (req.method === "GET" && path === "/health") return json({ status: "ok", environment: env.NEO_ENV || "unset" });
   if (req.method === "GET" && path === "/config") return json({ google_web_client_id: env.GOOGLE_WEB_CLIENT_ID || null });
-  // Browser bootstrap needs the verified account subject before the client can
-  // select its account-scoped IndexedDB identity. This endpoint deliberately
-  // requires Access authentication but no device proof, because enrolment has
-  // not happened yet. Return no other identity-provider claims.
+  if (req.method === "GET" && path === "/auth/challenge") {
+    try {
+      const timestamp = now();
+      await env.DB.prepare("DELETE FROM oidc_login_challenges WHERE expires_at <= ? OR consumed_at IS NOT NULL").bind(timestamp).run();
+      const requesterHash = await sha256Hex(req.headers.get("cf-connecting-ip") || "unknown");
+      const recent = await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM oidc_login_challenges WHERE requester_hash=? AND created_at>?",
+      ).bind(requesterHash, timestamp - 60).first<{ count: number }>();
+      if (Number(recent?.count || 0) >= 10) return fail(429, "challenge_rate_limited", "Too many sign-in challenges; wait one minute and retry");
+      const nonce = encodeBytesBase64Url(crypto.getRandomValues(new Uint8Array(32)));
+      await env.DB.prepare(
+        "INSERT INTO oidc_login_challenges(challenge_hash,requester_hash,created_at,expires_at) VALUES(?,?,?,?)",
+      ).bind(await sha256Hex(nonce), requesterHash, timestamp, timestamp + 600).run();
+      return json({ nonce, expires_at: timestamp + 600 });
+    } catch {
+      return fail(503, "challenge_unavailable", "A sign-in challenge could not be created");
+    }
+  }
+  // Browser bootstrap returns only the verified account subject. It does not
+  // consume the OIDC nonce; first-device enrollment consumes it exactly once.
   if (req.method === "GET" && path === "/session") {
     try {
       const claims = await identityClaimsFromRequest(req, env);
@@ -375,6 +401,9 @@ async function route(req: Request, env: Env): Promise<Response> {
           return fail(409, "device_revoked", "This device identity was revoked; create a new local device identity to enrol again");
         }
         return json({ device_id: deviceId, account_id: claims.sub, status: "enrolled" }, 200);
+      }
+      if (!await consumeGoogleLoginChallenge(claims, env)) {
+        return fail(401, "oidc_challenge_invalid", "Google sign-in challenge is missing, expired or already used; sign in again");
       }
       await env.DB.prepare("INSERT INTO devices(device_id, account_id, label, platform, public_key_jwk, capabilities_json, created_at) VALUES(?,?,?,?,?,?,?)")
         .bind(deviceId, claims.sub, x.label, x.platform, JSON.stringify(x.public_key_jwk), JSON.stringify(x.capabilities.slice(0,32)), now()).run();

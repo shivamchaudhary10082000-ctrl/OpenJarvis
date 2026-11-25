@@ -1177,6 +1177,21 @@ describe("Google OIDC identity bootstrap", () => {
     expect(await replay.json()).toMatchObject({ error: { code: "oidc_challenge_invalid" } });
   });
 
+  it("atomically rate-limits OIDC challenge issuance per requester IP", async () => {
+    const ip = "198.51.100.42";
+    for (let index = 0; index < 10; index++) {
+      const response = await worker.fetch(new Request(baseUrl + "/v1/auth/challenge", {
+        headers: { "cf-connecting-ip": ip },
+      }), bindings);
+      expect(response.status).toBe(200);
+    }
+    const limited = await worker.fetch(new Request(baseUrl + "/v1/auth/challenge", {
+      headers: { "cf-connecting-ip": ip },
+    }), bindings);
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toMatchObject({ error: { code: "challenge_rate_limited" } });
+  });
+
   it("rejects first Google device enrollment when the ID token has no nonce", async () => {
     mockGoogleKeys();
     const identityToken = await token();

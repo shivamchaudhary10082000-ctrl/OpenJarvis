@@ -18,6 +18,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.json.JSONObject
 import java.util.UUID
 
@@ -94,9 +97,24 @@ class NeoTestActivity : Activity() {
         output.text = "Opening Google Credential Manager…"
         activityScope.launch {
             try {
+                val challengeRequest = Request.Builder()
+                    .url(BuildConfig.NEO_API_BASE_URL.trimEnd('/') + "/v1/auth/challenge")
+                    .get()
+                    .build()
+                val nonce = withContext(Dispatchers.IO) {
+                    OkHttpClient().newCall(challengeRequest).execute().use { response ->
+                        if (!response.isSuccessful) {
+                            throw IllegalStateException("NEO sign-in challenge failed: HTTP ${response.code}")
+                        }
+                        val value = JSONObject(response.body?.string() ?: "{}").optString("nonce", "")
+                        require(value.length >= 32) { "NEO returned an invalid sign-in challenge" }
+                        value
+                    }
+                }
                 val option = GetGoogleIdOption.Builder()
                     .setFilterByAuthorizedAccounts(false)
                     .setServerClientId(BuildConfig.GOOGLE_WEB_CLIENT_ID)
+                    .setNonce(nonce)
                     .setAutoSelectEnabled(false)
                     .build()
                 val request = GetCredentialRequest.Builder()

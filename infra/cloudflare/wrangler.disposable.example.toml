@@ -1,8 +1,9 @@
 # Disposable NEO staging template.
 # Dedicated disposable staging configuration for the owner's NEO D1 database.
-# Keep scheduled maintenance disabled until migrations 0001-0008 have been
+# Keep scheduled maintenance disabled until migrations 0001-0010 have been
 # explicitly applied to this disposable database and the schema is verified.
-# Access issuer/audience remain placeholders; do not deploy until authentication is provisioned and reviewed.
+# Google OIDC is configured with the public Web client ID at deploy time.
+# Optional Cloudflare Access fallback remains unset. Provider credentials and budgets stay disabled.
 name = "neo-api-disposable-staging"
 main = "worker/src/index.ts"
 compatibility_date = "2026-11-20"

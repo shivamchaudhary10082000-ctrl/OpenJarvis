@@ -1,5 +1,8 @@
 # NEO browser authentication and hosting decision
 
+
+> **Implementation update — 2026-11-25 (supersedes older Access-only assumptions below):** The current disposable Alpha is served from the `neo-api-disposable-staging` Worker on its `workers.dev` origin, with the browser assets and `/v1/*` API on the same origin. The browser shell currently uses Google Identity Services and sends a Google ID token through an in-memory bearer-token callback. The Worker verifies Google OIDC RS256 signatures, issuer, configured audience, expiry, issued-at and optional not-before claims, and namespaces the verified subject as `google:<sub>`. Cloudflare Access `Cf-Access-Jwt-Assertion` support remains an optional migration fallback; the current disposable template does not configure `ACCESS_TEAM_DOMAIN` or `ACCESS_AUD`, so Access-cookie mode is not active. The latest disposable deployment run [#2](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45498115777) deployed the Worker/assets and received `{"status":"ok","environment":"disposable-staging"}` from `/v1/health`. That workflow does **not** apply D1 migrations; remote D1 schema state remains unverified. There is still no final custom domain, enforced NEO CSP, explicit sign-out/recovery flow, remote authenticated D1 smoke test or independent penetration test. See [implementation-status.md](implementation-status.md) for the complete current evidence and gates.
+
 **Status:** architecture decision record; implementation is intentionally gated on the owner choosing the real hostname and authentication mode.  
 **Scope:** NEO browser client and Cloudflare Worker only. This is not a production deployment approval.
 

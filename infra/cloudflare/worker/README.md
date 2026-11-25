@@ -1,10 +1,11 @@
 # NEO Cloudflare Worker
 
-This is the first executable NEO API gateway implementation. It is source code with local integration tests, **not a deployed or production-ready service**.
+This is the executable NEO API gateway implementation. It is deployed only to the disposable staging Worker; the remote D1 schema and authenticated data paths are not yet verified, so it is **not production-ready**.
 
 ## Implemented routes and controls
 
-- Cloudflare Access JWT verification (RS256, issuer, audience, expiry) and account/device binding.
+- Google OIDC ID-token verification (RS256, issuer, audience, expiry) for browser/native identity bootstrap and first-device enrolment; optional Cloudflare Access JWT fallback; account/device binding.
+- Important auth limitation: Google ID tokens are not yet bound to a server-issued one-time nonce/challenge. Complete challenge/replay hardening before treating first-device enrollment as production-safe.
 - First-device and additional-device enrolment using a client-generated P-256 public key.
 - Signed device requests with a five-minute timestamp window and one-use nonce replay protection.
 - Device listing, online freshness indicator, authenticated heartbeat and immediate revocation; scheduled cleanup removes expired nonce replay records every 15 minutes.
@@ -33,7 +34,7 @@ Voice requests require VOICE_TRANSCRIBE_MAX_COST_USD_MICROS or VOICE_SYNTHESIS_M
 
 Run npm install, Redocly OpenAPI lint, npm run check, npm run deploy:dry-run and npm test.
 
-Vitest runs in the Cloudflare Workers runtime with local SQLite-backed D1 and applies migrations 0001–0008. Latest verified run #91 passed: Redocly lint (no warnings), TypeScript check, Wrangler deploy dry-run, npm audit (0 vulnerabilities) and 2 test files / 43 tests. The dry-run built a 43.82 KiB Worker (10.53 KiB gzip). This is local integration evidence, not remote D1 or staging proof.
+Vitest runs in the Cloudflare Workers runtime with local SQLite-backed D1 and applies the checked-in migrations 0001–0009. Latest pre-fix verified run #208 passed 66 Worker tests and the native browser persistence matrix 9/9; the cumulative token-budget regression in migration 0009 is awaiting fresh CI verification. Local integration evidence is not remote D1 or staging proof.
 
 ## Offline clients
 
@@ -42,13 +43,13 @@ Vitest runs in the Cloudflare Workers runtime with local SQLite-backed D1 and ap
 - Both expose heartbeat calls. The host application must schedule heartbeat and outbox flush when connected.
 - Offline mode currently supports encrypted cached memory and queued writes/tasks; **local model inference fallback is not implemented**.
 
-Android is a transport/storage primitive, not a built app. There is no Gradle app/test project or real-device validation yet.
+The Android transport/storage primitive and a diagnostic Gradle harness now exist. CI covers Android unit tests and emulator instrumentation; this is not yet a finished consumer Android assistant UI, and no physical-device validation has been performed.
 
 ## Staging checklist
 
 1. Create Cloudflare Access application; set team issuer domain and audience.
 2. Create staging D1 and replace the placeholder database ID.
-3. Apply migrations 0001–0008 in order; verify the migration list.
+3. Review `../D1_STAGING_RUNBOOK.md`; apply migrations 0001–0009 only after a verified backup and explicit owner approval; verify the migration list.
 4. Keep provider secrets unset initially. Verify auth, revocation, memory, task and rate-limit flows.
 5. Configure a low owner-approved spend/token cap and reviewed provider prices only after choosing a provider/model.
 6. Test real provider failover and voice billing with sandbox credentials and hard caps.

@@ -1,0 +1,186 @@
+name: NEO disposable D1 migration preflight and apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_migrations:
+        description: "Explicitly approve applying pending migrations 0001–0010 to neo-staging-db. Leave unchecked for preflight and backup only."
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: neo-disposable-d1-migrations
+  cancel-in-progress: false
+
+jobs:
+  preflight-and-optional-apply:
+    if: github.ref == 'refs/heads/neo/foundation-architecture'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_MIGRATION_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      NEO_GOOGLE_WEB_CLIENT_ID: ${{ vars.NEO_GOOGLE_WEB_CLIENT_ID }}
+      EXPECTED_D1_ID: dd4c03d6-a286-4ac9-abbc-8f162b692acc
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate branch, credentials and exact migration set
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/neo/foundation-architecture" || {
+            echo "::error::This workflow is restricted to the NEO engineering branch."; exit 1;
+          }
+          test -n "$CLOUDFLARE_API_TOKEN" || {
+            echo "::error::Add CLOUDFLARE_D1_MIGRATION_TOKEN as a separate GitHub Actions secret. It must be Developer Platform Editor scoped only to neo-staging-db."; exit 1;
+          }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || {
+            echo "::error::CLOUDFLARE_ACCOUNT_ID repository variable is missing."; exit 1;
+          }
+          test -n "$NEO_GOOGLE_WEB_CLIENT_ID" || {
+            echo "::error::NEO_GOOGLE_WEB_CLIENT_ID repository variable is missing."; exit 1;
+          }
+          actual="$(find infra/cloudflare/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort)"
+          expected="$(printf '%s\n' \
+            0001_neo_core.sql \
+            0002_device_request_nonces.sql \
+            0003_task_capabilities.sql \
+            0004_api_rate_limits.sql \
+            0005_provider_spend_limits.sql \
+            0006_provider_spend_settlement_guard.sql \
+            0007_offline_idempotency.sql \
+            0008_provider_token_budgets.sql \
+            0009_enforce_settled_token_budgets.sql \
+            0010_oidc_login_challenges.sql)"
+          test "$actual" = "$expected" || {
+            echo "::error::The checked-in migration set differs from the reviewed 0001–0010 set. Stop and review."; exit 1;
+          }
+
+      - name: Install pinned Wrangler
+        working-directory: infra/cloudflare/worker
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Materialize and verify disposable-only Wrangler config
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp infra/cloudflare/wrangler.disposable.example.toml infra/cloudflare/wrangler.disposable.toml
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          const path = "infra/cloudflare/wrangler.disposable.toml";
+          const clientId = process.env.NEO_GOOGLE_WEB_CLIENT_ID;
+          let config = fs.readFileSync(path, "utf8").replaceAll("REPLACE-WITH-GOOGLE-WEB-CLIENT-ID", clientId);
+          for (const required of [
+            'name = "neo-api-disposable-staging"',
+            'database_name = "neo-staging-db"',
+            'database_id = "dd4c03d6-a286-4ac9-abbc-8f162b692acc"',
+            'migrations_dir = "migrations"',
+          ]) {
+            if (!config.includes(required)) throw new Error("Disposable config identity mismatch: " + required);
+          }
+          if (config.includes("REPLACE-WITH-") || /\[triggers\]/i.test(config)) {
+            throw new Error("Unresolved placeholder or scheduled trigger found in disposable config");
+          }
+          fs.writeFileSync(path, config);
+          NODE
+
+      - name: Verify remote D1 identity and record Time Travel bookmark
+        working-directory: infra/cloudflare/worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler d1 info neo-staging-db --json --config ../wrangler.disposable.toml > /tmp/neo-d1-info.json
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          const expected = process.env.EXPECTED_D1_ID;
+          const value = JSON.parse(fs.readFileSync("/tmp/neo-d1-info.json", "utf8"));
+          const ids = [];
+          const visit = (item) => {
+            if (!item || typeof item !== "object") return;
+            for (const [key, child] of Object.entries(item)) {
+              if (["uuid", "database_id", "databaseId"].includes(key) && typeof child === "string") ids.push(child);
+              visit(child);
+            }
+          };
+          visit(value);
+          if (!ids.includes(expected)) {
+            throw new Error("D1 identity could not be proven to match the approved staging UUID; refusing to continue");
+          }
+          NODE
+          npx wrangler d1 time-travel info neo-staging-db --json --config ../wrangler.disposable.toml > /tmp/neo-d1-bookmark.json
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          const value = JSON.parse(fs.readFileSync("/tmp/neo-d1-bookmark.json", "utf8"));
+          const bookmarks = [];
+          const visit = (item) => {
+            if (!item || typeof item !== "object") return;
+            for (const [key, child] of Object.entries(item)) {
+              if (key.toLowerCase().includes("bookmark") && typeof child === "string") bookmarks.push(child);
+              visit(child);
+            }
+          };
+          visit(value);
+          if (!bookmarks.length) throw new Error("No D1 Time Travel bookmark was returned");
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+            "### NEO disposable D1 preflight\n\n- Database: `neo-staging-db`\n- Database ID: `" + process.env.EXPECTED_D1_ID +
+            "`\n- Pre-migration bookmark: `" + bookmarks[0] + "`\n");
+          NODE
+
+      - name: Export pre-migration SQL backup
+        working-directory: infra/cloudflare/worker
+        run: |
+          npx wrangler d1 export neo-staging-db --remote --output=/tmp/neo-staging-pre-migration.sql --config ../wrangler.disposable.toml
+          test -s /tmp/neo-staging-pre-migration.sql
+
+      - name: Upload private pre-migration backup (1-day retention)
+        uses: actions/upload-artifact@v4
+        with:
+          name: neo-staging-pre-migration-backup
+          path: /tmp/neo-staging-pre-migration.sql
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Show current remote migration state
+        working-directory: infra/cloudflare/worker
+        run: npx wrangler d1 migrations list neo-staging-db --remote --config ../wrangler.disposable.toml
+
+      - name: Apply migrations only when explicitly approved
+        if: inputs.apply_migrations == true
+        working-directory: infra/cloudflare/worker
+        run: npx wrangler d1 migrations apply neo-staging-db --remote --config ../wrangler.disposable.toml
+
+      - name: Verify final migration state and critical schema objects
+        if: inputs.apply_migrations == true
+        working-directory: infra/cloudflare/worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler d1 migrations list neo-staging-db --remote --config ../wrangler.disposable.toml
+          npx wrangler d1 execute neo-staging-db --remote --json \
+            --command "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('accounts','devices','memory_records','task_leases','provider_spend_usage','oidc_login_challenges') ORDER BY name" \
+            --config ../wrangler.disposable.toml > /tmp/neo-d1-schema.json
+          for name in accounts devices memory_records task_leases provider_spend_usage oidc_login_challenges; do
+            grep -q "$name" /tmp/neo-d1-schema.json || {
+              echo "::error::Expected D1 table missing after migration: $name"; exit 1;
+            }
+          done
+          npx wrangler d1 execute neo-staging-db --remote --json \
+            --command "SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('provider_token_budget_reserve_before_insert','oidc_login_challenge_rate_limit')" \
+            --config ../wrangler.disposable.toml > /tmp/neo-d1-triggers.json
+          grep -q "provider_token_budget_reserve_before_insert" /tmp/neo-d1-triggers.json
+          grep -q "oidc_login_challenge_rate_limit" /tmp/neo-d1-triggers.json
+          echo "### D1 migrations applied and critical schema verified" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Confirm preflight-only run made no schema changes
+        if: inputs.apply_migrations != true
+        run: |
+          echo "Preflight and backup completed. No D1 migrations were applied." >> "$GITHUB_STEP_SUMMARY"

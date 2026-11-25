@@ -21,8 +21,9 @@ Migrations are ordered in `infra/cloudflare/migrations/`:
 7. `0007_offline_idempotency.sql`
 8. `0008_provider_token_budgets.sql`
 9. `0009_enforce_settled_token_budgets.sql`
+10. `0010_oidc_login_challenges.sql`
 
-Migration 0009 fixes a correctness gap in 0008: token reservation checks must count both settled usage and currently reserved usage against each monthly cap.
+Migration 0009 fixes a correctness gap in 0008: token reservation checks must count both settled usage and currently reserved usage against each monthly cap. Migration 0010 adds hashed, short-lived, one-time OIDC nonce challenges used to protect first-device enrollment from ID-token replay.
 
 ## Required preflight
 

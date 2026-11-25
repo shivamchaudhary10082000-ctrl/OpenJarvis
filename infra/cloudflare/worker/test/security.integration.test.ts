@@ -1135,6 +1135,73 @@ describe("Google OIDC identity bootstrap", () => {
     await expect(response.json()).resolves.toEqual({ account_id: "google:google-test-subject-123" });
   });
 
+  it("requires a fresh server-issued nonce for first Google device enrollment and rejects replay", async () => {
+    mockGoogleKeys();
+    const challengeResponse = await worker.fetch(new Request(baseUrl + "/v1/auth/challenge"), bindings);
+    expect(challengeResponse.status).toBe(200);
+    const challenge = await challengeResponse.json() as { nonce: string; expires_at: number };
+    expect(challenge.nonce).toMatch(/^[A-Za-z0-9_-]{40,64}$/);
+    expect(challenge.expires_at).toBeGreaterThan(Math.floor(Date.now() / 1000));
+
+    const identityToken = await token({ nonce: challenge.nonce });
+    const pair = await crypto.subtle.generateKey(
+      { name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"],
+    );
+    const publicJwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
+    const firstDeviceId = crypto.randomUUID().replace(/-/g, "");
+    const enrol = (deviceId: string, jwk: JsonWebKey) => worker.fetch(new Request(baseUrl + "/v1/devices", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer " + identityToken,
+        "content-type": "application/json",
+        "x-neo-device-id": deviceId,
+      },
+      body: JSON.stringify({
+        label: "Google nonce test device",
+        platform: "browser",
+        public_key_jwk: jwk,
+        capabilities: ["chat"],
+      }),
+    }), { ...bindings, GOOGLE_OAUTH_CLIENT_IDS: clientId } as Env);
+
+    const first = await enrol(firstDeviceId, publicJwk);
+    expect(first.status).toBe(201);
+    expect(await first.json()).toMatchObject({ device_id: firstDeviceId, status: "enrolled" });
+
+    const secondPair = await crypto.subtle.generateKey(
+      { name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"],
+    );
+    const secondPublicJwk = await crypto.subtle.exportKey("jwk", secondPair.publicKey);
+    const replay = await enrol(crypto.randomUUID().replace(/-/g, ""), secondPublicJwk);
+    expect(replay.status).toBe(401);
+    expect(await replay.json()).toMatchObject({ error: { code: "oidc_challenge_invalid" } });
+  });
+
+  it("rejects first Google device enrollment when the ID token has no nonce", async () => {
+    mockGoogleKeys();
+    const identityToken = await token();
+    const pair = await crypto.subtle.generateKey(
+      { name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"],
+    );
+    const publicJwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
+    const response = await worker.fetch(new Request(baseUrl + "/v1/devices", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer " + identityToken,
+        "content-type": "application/json",
+        "x-neo-device-id": crypto.randomUUID().replace(/-/g, ""),
+      },
+      body: JSON.stringify({
+        label: "Missing nonce test",
+        platform: "browser",
+        public_key_jwk: publicJwk,
+        capabilities: ["chat"],
+      }),
+    }), { ...bindings, GOOGLE_OAUTH_CLIENT_IDS: clientId } as Env);
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ error: { code: "oidc_challenge_invalid" } });
+  });
+
   it.each([
     ["wrong issuer", { iss: "https://attacker.invalid" }],
     ["wrong audience", { aud: "another-client.apps.googleusercontent.com" }],

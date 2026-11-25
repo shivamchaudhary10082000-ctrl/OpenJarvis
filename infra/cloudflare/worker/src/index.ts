@@ -339,7 +339,7 @@ async function route(req: Request, env: Env): Promise<Response> {
   if (req.method === "GET" && path === "/auth/challenge") {
     try {
       const timestamp = now();
-      await env.DB.prepare("DELETE FROM oidc_login_challenges WHERE expires_at <= ? OR consumed_at IS NOT NULL").bind(timestamp).run();
+      await env.DB.prepare("DELETE FROM oidc_login_challenges WHERE expires_at <= ?").bind(timestamp).run();
       const requesterHash = await sha256Hex(req.headers.get("cf-connecting-ip") || "unknown");
       const recent = await env.DB.prepare(
         "SELECT COUNT(*) AS count FROM oidc_login_challenges WHERE requester_hash=? AND created_at>?",

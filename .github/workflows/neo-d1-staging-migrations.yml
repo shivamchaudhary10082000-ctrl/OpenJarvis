@@ -1,13 +1,12 @@
 name: NEO disposable D1 migration preflight and apply
 
 on:
-  workflow_dispatch:
-    inputs:
-      apply_migrations:
-        description: "Explicitly approve applying pending migrations 0001–0010 to neo-staging-db. Leave unchecked for preflight and backup only."
-        required: true
-        type: boolean
-        default: false
+  push:
+    branches:
+      - neo/foundation-architecture
+    paths:
+      - "infra/cloudflare/D1_MIGRATION_APPROVAL.txt"
+      - ".github/workflows/neo-d1-staging-migrations.yml"
 
 permissions:
   contents: read
@@ -18,7 +17,7 @@ concurrency:
 
 jobs:
   preflight-and-optional-apply:
-    if: github.ref == 'refs/heads/neo/foundation-architecture'
+    if: github.ref == 'refs/heads/neo/foundation-architecture' && (contains(github.event.head_commit.message, '[neo-d1-preflight]') || contains(github.event.head_commit.message, '[neo-d1-apply]'))
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -32,6 +31,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+
+      - id: approval
+        name: Validate explicit preflight or apply approval
+        shell: bash
+        run: |
+          set -euo pipefail
+          approval="$(tr -d '[:space:]' < infra/cloudflare/D1_MIGRATION_APPROVAL.txt)"
+          message="$(git log -1 --pretty=%B)"
+          if [[ "$approval" == "PREFLIGHT_ONLY" && "$message" == *"[neo-d1-preflight]"* ]]; then
+            echo "apply=false" >> "$GITHUB_OUTPUT"
+            echo "Preflight-only mode selected; no schema writes will run."
+          elif [[ "$approval" == "APPLY_0001_0010" && "$message" == *"[neo-d1-apply]"* ]]; then
+            echo "apply=true" >> "$GITHUB_OUTPUT"
+            echo "Explicit approval recorded for migrations 0001–0010 on disposable D1."
+          else
+            echo "::error::Approval file and commit message do not match an allowed action. Use PREFLIGHT_ONLY with [neo-d1-preflight], or APPLY_0001_0010 with [neo-d1-apply]."
+            exit 1
+          fi
 
       - name: Validate branch, credentials and exact migration set
         shell: bash
@@ -154,7 +171,7 @@ jobs:
         run: npx wrangler d1 migrations list neo-staging-db --remote --config ../wrangler.disposable.toml
 
       - name: Apply migrations only when explicitly approved
-        if: inputs.apply_migrations == true
+        if: steps.approval.outputs.apply == 'true'
         working-directory: infra/cloudflare/worker
         run: npx wrangler d1 migrations apply neo-staging-db --remote --config ../wrangler.disposable.toml
 
@@ -181,6 +198,6 @@ jobs:
           echo "### D1 migrations applied and critical schema verified" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Confirm preflight-only run made no schema changes
-        if: inputs.apply_migrations != true
+        if: steps.approval.outputs.apply != 'true'
         run: |
           echo "Preflight and backup completed. No D1 migrations were applied." >> "$GITHUB_STEP_SUMMARY"

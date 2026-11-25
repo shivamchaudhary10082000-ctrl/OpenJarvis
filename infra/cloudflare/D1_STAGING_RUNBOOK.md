@@ -81,7 +81,7 @@ A push-triggered, approval-gated workflow is available at `.github/workflows/neo
 
 1. Add `CLOUDFLARE_D1_MIGRATION_TOKEN` as a GitHub Actions secret. It must be a separate token with Developer Platform **Editor** role scoped to the single `neo-staging-db` D1 resource.
 2. For preflight only, edit `D1_MIGRATION_APPROVAL.txt` to `PREFLIGHT_ONLY` and commit to `neo/foundation-architecture` with `[neo-d1-preflight]` in the commit message. This verifies database identity, records a Time Travel bookmark, exports a SQL backup and lists migration state; it does not change the schema.
-3. Inspect the workflow summary, download and safely retain the private backup artifact (one-day retention), and review the pending migration list.
+3. Inspect the workflow summary and review the pending migration list. The SQL export is created and checked on the ephemeral runner but is deliberately not uploaded: this repository is public, and a database dump must not be placed in public GitHub artifacts. The Time Travel bookmark is the durable rollback point. If a separate SQL copy is required, use the manual CLI export to a private location outside the repository.
 4. Only after explicit owner approval, edit the file to `APPLY_0001_0010` and commit to the same branch with `[neo-d1-apply]` in the commit message. That exact file value plus commit marker is the explicit apply authorization. It applies only the checked-in migrations 0001–0010 to the hard-coded staging database UUID, then verifies critical tables and triggers.
 5. After successful migration, reset the approval file to `NO`, revoke the temporary D1 migration token and remove its GitHub secret. Keep the existing Worker-only deployment token separate.
 

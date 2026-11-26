@@ -43,6 +43,7 @@ jobs:
           test -s /tmp/neo-backup-fixture/fixture.sql.age
           echo "Ciphertext created before artifact upload."
       - name: Upload ciphertext and checksum only
+        id: upload-rehearsal-artifact
         uses: actions/upload-artifact@v4
         with:
           name: neo-d1-recovery-rehearsal-${{ github.run_id }}
@@ -54,7 +55,7 @@ jobs:
       - name: Download artifact for recovery rehearsal
         uses: actions/download-artifact@v4
         with:
-          name: neo-d1-recovery-rehearsal-${{ github.run_id }}
+          artifact-ids: ${{ steps.upload-rehearsal-artifact.outputs.artifact-id }}
           path: /tmp/neo-recovery-download
       - name: Verify checksum, decrypt, restore to isolated SQLite, and validate
         run: |

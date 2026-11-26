@@ -479,12 +479,16 @@ async function route(req: Request, env: Env): Promise<Response> {
         return fail(403, "account_inactive", "Account is not active");
       }
       await enforceAccountRateLimit(claims.sub, env);
-      if (!await consumeGoogleLoginChallenge(claims, env)) {
-        return fail(401, "oidc_challenge_invalid", "Google sign-in challenge is missing, expired or already used; sign in again");
-      }
       const existingDevice = await env.DB.prepare(
         "SELECT account_id, public_key_jwk, platform, revoked_at FROM devices WHERE device_id = ?",
       ).bind(deviceId).first<{account_id:string;public_key_jwk:string;platform:string;revoked_at:number|null}>();
+      const browserGoogleLogin = x.platform === "browser" &&
+        (claims.iss === "https://accounts.google.com" || claims.iss === "accounts.google.com");
+      if (browserGoogleLogin || !existingDevice) {
+        if (!await consumeGoogleLoginChallenge(claims, env)) {
+          return fail(401, "oidc_challenge_invalid", "Google sign-in challenge is missing, expired or already used; sign in again");
+        }
+      }
       if (existingDevice) {
         let existingKey: JsonWebKey | null = null;
         try { existingKey = JSON.parse(existingDevice.public_key_jwk) as JsonWebKey; } catch {}

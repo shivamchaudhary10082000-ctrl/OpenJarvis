@@ -248,7 +248,7 @@ describe("D1-backed Access and device proof", () => {
     mockGoogleCerts(kid);
     const googleBindings = { DB: bindings.DB, GOOGLE_OAUTH_CLIENT_IDS: "neo-browser-test-client" } as Env;
     const challengeResponse = await worker.fetch(new Request(baseUrl + "/v1/auth/challenge", {
-      headers: { "cf-connecting-ip": "198.51.100.42" },
+      headers: { "cf-connecting-ip": "192.0.2." + crypto.randomUUID() },
     }), googleBindings);
     expect(challengeResponse.status).toBe(200);
     const challenge = await challengeResponse.json() as { nonce: string };
@@ -327,7 +327,7 @@ describe("D1-backed Access and device proof", () => {
     const afterRevoke = await signedRequest(device, "/v1/devices/heartbeat", {
       method: "POST", headers: { cookie: "__Host-neo_session=" + token, origin: baseUrl, "sec-fetch-site": "same-origin" },
     });
-    expect((await worker.fetch(afterRevoke, bindings)).status).toBe(403);
+    expect((await worker.fetch(afterRevoke, bindings)).status).toBe(401);
   });
 
   it("invalid or revoked browser cookies never fall back to a valid bearer token", async () => {
@@ -357,7 +357,7 @@ describe("D1-backed Access and device proof", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual({ account_id: subject });
+    expect(await response.json()).toEqual({ account_id: subject, session_type: "identity_bootstrap" });
 
     // A present invalid assertion remains authoritative even if a valid bearer
     // token is also supplied; the bootstrap route must not weaken precedence.
@@ -1272,12 +1272,12 @@ describe("Google OIDC identity bootstrap", () => {
       headers: { authorization: "Bearer " + identityToken },
     }), { ...bindings, GOOGLE_OAUTH_CLIENT_IDS: clientId } as Env);
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ account_id: "google:google-test-subject-123" });
+    await expect(response.json()).resolves.toEqual({ account_id: "google:google-test-subject-123", session_type: "identity_bootstrap" });
   });
 
   it("requires a fresh server-issued nonce for first Google device enrollment and rejects replay", async () => {
     mockGoogleKeys();
-    const challengeResponse = await worker.fetch(new Request(baseUrl + "/v1/auth/challenge"), bindings);
+    const challengeResponse = await worker.fetch(new Request(baseUrl + "/v1/auth/challenge", { headers: { "cf-connecting-ip": "203.0.113." + crypto.randomUUID() } }), bindings);
     expect(challengeResponse.status).toBe(200);
     const challenge = await challengeResponse.json() as { nonce: string; expires_at: number };
     expect(challenge.nonce).toMatch(/^[A-Za-z0-9_-]{40,64}$/);

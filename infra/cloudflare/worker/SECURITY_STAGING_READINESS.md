@@ -1,39 +1,68 @@
 # NEO Worker security review and staging readiness
 
-Reviewed against branch commit `459e6ca3e0f6ee0f7eea4e7e2d554d1cd19ab656`.
+Reviewed against the engineering branch after commit `b90852c9e7abaf7e8a9d267301583dc636a86dea`.
 
-## CI evidence
-- Worker TypeScript check, dry-run, Worker test suite and browser persistence tests passed on the latest branch commit.
-- Google ID-token and Cloudflare Access JWT validation, issuer/audience/expiry/signature validation, challenge checks are implemented.
-- Device requests use enrolled P-256 keys, signed request canonicalization, timestamp bounds and nonces.
-- Rate limiting, bounded bodies, memory revisions, task leases and spend reservation/settlement logic exist.
-- Provider spend/token caps are configured to zero in the staging template; keep inference blocked until budget/pricing is reviewed.
+## Current code and CI evidence
 
-## Live verification
-- Live staging health was not independently confirmed in this review.
-- Latest disposable staging workflow had both migration and deployment jobs skipped.
-- Remote D1 migration state is not verified; do not assume migrations 0001-0010 are applied.
-- Browser sign-in, enrollment, signed requests, memory sync and recovery have not been confirmed on deployed Worker.
+- Worker CI run #248 on commit `6694cb561a5e3390b7727f142d4ecac0d67129c2` passed TypeScript checking, Wrangler dry-run, OpenAPI lint, Worker tests and browser persistence tests.
+- The latest branch includes a staging-workflow action upgrade to `actions/checkout@v7` and `actions/setup-node@v6`; the resulting full CI runs are still being evaluated.
+- Google ID-token validation checks RS256 signature, issuer, audience, issued-at and expiry. First-device Google enrollment uses a short-lived, one-use server nonce.
+- Device requests use enrolled P-256 keys, signed request canonicalization, timestamp bounds and one-use nonces.
+- Rate limiting, bounded bodies, memory revisions, task leases and provider spend reservation/settlement controls are implemented and covered by automated tests.
+- Staging provider URLs/credentials are unset and monthly USD/input/output token budgets are zero.
 
-## Hardening gaps to close
-1. Confirm browser auth/session model in a real browser. Avoid JS-accessible persisted bearer credentials; prefer HttpOnly, Secure, SameSite server-managed sessions and CSRF controls where architecture supports it. `/session` currently returns identity; it is not itself a session exchange.
-2. Verify origin/CSRF policy for browser mutation endpoints and restrictive CORS.
-3. Verify challenge issuance limits, expiration, one-time consumption and recovery against live D1.
-4. Verify nonce cleanup/replay rejection, revocation, rate limits and task lease conflict behavior live.
-5. Verify reservation/settlement and stale reconciliation; no real providers while budget is zero.
-6. Review logs/responses for secret/token leakage.
-7. Verify exact disposable Worker and D1 configuration before deploying; avoid generic configuration.
+## Confirmed D1 preflight evidence
 
-## Safe staging sequence
-1. Verify branch and disposable configuration identity (Worker, D1 name/UUID, environment).
-2. Inspect migration set and remote migration list.
-3. Obtain Time Travel bookmark and private backup before schema changes.
-4. Run migration preflight only with separately scoped token.
-5. Review preflight and require explicit approval before applying migrations.
-6. Apply only approved migrations; verify schema.
-7. Deploy Worker/browser assets to disposable staging only.
-8. Verify health and exercise login challenge, enrollment, heartbeat, revocation, memory sync, task lease, zero-budget model blocking and browser persistence.
-9. Reset approval marker and revoke/remove temporary migration token.
+Workflow run #36 (`45781211390`) completed successfully against the intended disposable target:
 
-## Boundaries
-No main/production merge, billing activation, provider calls or remote D1 schema changes performed.
+- Database: `neo-staging-db`
+- Database UUID: `dd4c03d6-a286-4ac9-abbc-8f162b692acc`
+- Time Travel bookmark recorded.
+- SQL export completed and was checked for non-zero size on the ephemeral GitHub runner.
+- Remote migration list was inspected and showed no pending migrations in that run.
+- Migration apply and Worker deploy steps were skipped. **No remote schema changes were made.**
+
+Important limitations:
+- The SQL export existed only on the ephemeral runner and was not retained as a durable private backup.
+- The old run printed a temporary signed export URL in the public Actions log. The URL was time-limited; do not reuse or repeat it. Commit `6694cb561a5e3390b7727f142d4ecac0d67129c2` changed the workflow to suppress Wrangler export output. That suppression still needs a fresh preflight to verify.
+- The current approval file is `NO`. No migration is authorized.
+
+## Authentication/session findings
+
+- The browser obtains a Google ID token through Google Identity Services and keeps it in JavaScript memory only; it is not persisted in IndexedDB.
+- Browser requests currently send that Google ID token as a bearer credential.
+- `GET /v1/session` validates the identity token and returns the account subject. It does **not** create a server-managed session.
+- There is no opaque, revocable browser session cookie or server-side session table yet.
+- Browser API assets and Worker API are served from the same origin. No wildcard CORS policy is configured. Cookie-based mutation CSRF/origin enforcement is not implemented because cookie sessions do not yet exist.
+- The current integration tests cover Google OIDC validation, challenge replay rejection, browser device enrollment through identity assertions, device proof replay, account isolation, heartbeat and revocation. They do not prove a real deployed Google login or a persistent browser session.
+
+A proper browser session exchange needs a reviewed design and a new migration (session hash, account/device binding, expiry and revocation), HttpOnly/Secure/SameSite cookie handling, same-origin mutation checks, logout/revocation and focused tests. Do not claim session hardening complete until those changes and tests pass.
+
+## Live staging status
+
+- An earlier disposable deployment run #2 deployed commit `0676cb8a3a414e7b6fcfec04607d11728301653e`; its health probe returned `status=ok` for `disposable-staging`.
+- That deployment predates later OIDC challenge and migration changes. The current engineering head is **not deployed**.
+- Deployment runs #36, #37, #38 and #40 skipped their deployment jobs as expected because no staging-deploy approval marker was supplied.
+- Current live D1 schema state has not been independently verified.
+- Real Google sign-in, first-device enrollment, authenticated browser operations, Android-to-browser sync and recovery have not been verified against the current Worker.
+
+## Remaining release gates
+
+1. Complete and independently test the opaque browser-session design.
+2. Finish the full CI set on the latest branch head; investigate any failures rather than relying on old green runs.
+3. Establish a durable private backup destination. A public repository artifact or unencrypted public backup is not acceptable. D1 Time Travel is a useful short-retention recovery layer, not the only backup.
+4. Update the migration set and exact approval workflow for any new session schema.
+5. Run a fresh read-only preflight with the signed-URL log suppression in place; verify target UUID, remote migration list, Time Travel bookmark and private backup.
+6. Present the exact migration set, SQL effects, backup, restore/rollback method and command to the owner. Obtain explicit approval before any remote D1 write.
+7. Apply only the approved migrations to the hard-coded disposable D1 UUID and verify migration history, tables, columns, indexes and triggers.
+8. Deploy the current Worker/browser assets to `neo-api-disposable-staging` only, then verify health and authenticated operations.
+9. Test login challenge, enrollment, signed heartbeat, revocation, replay rejection, memory sync, task lease conflict, zero-budget provider blocking and browser persistence.
+10. Reset approval to `NO`, then revoke/remove temporary migration credentials after use.
+
+## Permission and safety boundaries
+
+- No main merge, production deployment, release publication, billing activation or provider calls.
+- No remote D1 writes without a separate, explicit owner approval after a detailed preflight and migration plan.
+- The temporary migration token previously configured for this task has account-wide D1 Write scope because the UI did not offer the intended database-level selector. It must not be used; it is due to expire on 2026-12-03. Do not create another broad token as a workaround.
+- The existing Worker-only deployment token is separate and must not be reused for D1.
+- Do not modify the user's separate Supabase physiotherapy project.

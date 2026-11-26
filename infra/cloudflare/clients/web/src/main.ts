@@ -76,6 +76,22 @@ async function connect() {
     showError(message + " — NEO staging may not be configured or reachable yet.");
   }
 }
+async function restoreBrowserSession(): Promise<boolean> {
+  try {
+    const session = await NeoDeviceClient.resolveBrowserSession(window.location.origin);
+    const restored = await NeoDeviceClient.create(window.location.origin, undefined, session.account_id);
+    if (restored.deviceId !== session.device_id) {
+      await fetch(window.location.origin + "/v1/auth/logout", { method: "POST", credentials: "same-origin", cache: "no-store" });
+      throw new Error("This browser's local device key does not match its server session. Sign in again to enrol a new browser identity.");
+    }
+    await restored.heartbeat();
+    client = restored;
+    setConnected("Browser device · " + restored.deviceId.slice(0, 8));
+    return true;
+  } catch {
+    return false;
+  }
+}
 async function initialiseGoogleSignIn() {
   try {
     const response = await fetch("/v1/config", { cache: "no-store" });
@@ -162,3 +178,7 @@ clearButton.addEventListener("click", () => {
   empty.textContent = "Your conversation starts here. Ask NEO anything.";
   messagesNode.append(empty);
 });
+
+void (async () => {
+  if (!await restoreBrowserSession()) await initialiseGoogleSignIn();
+})();

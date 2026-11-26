@@ -16,9 +16,11 @@ Use a dedicated private Cloudflare R2 bucket, separate from the NEO Worker and D
 Required owner-side setup before automation:
 1. Create a private bucket named `neo-staging-d1-backups` in the same Cloudflare account. Do not enable public access or a custom public domain.
 2. Create an R2 API token scoped only to this bucket, with Object Read + Object Write (no bucket administration, no D1 permissions, no Workers permissions). Prefer short expiry and rotate it after backup setup.
-3. Add the R2 credentials as GitHub Actions secrets with the minimum required scope. Never paste credentials into chat or commit them.
-4. Choose a backup encryption method and retain the decryption key outside GitHub (password manager or offline secure storage). Preferred: client-side age encryption to an owner-held public recipient key; the private identity must never be placed in GitHub.
-5. Agree on retention, e.g. daily 14 days + weekly 8 weeks, and lifecycle deletion on the bucket. Keep the bucket private and enable object versioning if available.
+3. Add the R2 credentials as GitHub Actions secrets `NEO_R2_ACCESS_KEY_ID` and `NEO_R2_SECRET_ACCESS_KEY`. Add repository variables `NEO_R2_BUCKET_NAME` and `NEO_BACKUP_AGE_RECIPIENT`. Never paste credentials into chat or commit them.
+4. Generate an age key pair locally. Store only the public recipient string in `NEO_BACKUP_AGE_RECIPIENT`; retain the private identity outside GitHub (password manager or offline secure storage). Never add the private identity to GitHub.
+5. The staging migration workflow now refuses any D1 apply unless it can encrypt the ephemeral SQL export with age, upload ciphertext to the configured R2 bucket, download it again, and verify the ciphertext SHA-256. It writes only the object key and checksum to the Actions summary. No R2 secrets or bucket are configured yet, so the apply gate cannot pass.
+6. After upload, owner must independently download and decrypt the backup and rehearse SQL restore against a separate disposable D1 database. CI does not have the owner-held private key and cannot claim this restore test.
+7. Agree on retention, e.g. daily 14 days + weekly 8 weeks, and lifecycle deletion on the bucket. Keep the bucket private and enable object versioning if available.
 
 ## Backup object contract
 

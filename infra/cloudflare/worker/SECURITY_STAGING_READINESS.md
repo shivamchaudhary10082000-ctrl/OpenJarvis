@@ -42,7 +42,7 @@ Workflow run #36 (`45781211390`) completed a read-only preflight against the int
 Important limitations:
 - The SQL export existed only on the ephemeral runner and was not retained as a durable private backup.
 - The old run printed a temporary signed export URL in the public Actions log. The URL was time-limited; do not reuse or repeat it. Commit `6694cb561a5e3390b7727f142d4ecac0d67129c2` changed the workflow to suppress Wrangler export output. That suppression still needs a fresh preflight verification.
-- Migration `0011_browser_sessions.sql` is new source and is not applied remotely.
+- The remote database is not initialized with any of the NEO migrations; all of 0001–0011 remain pending. The Worker health route does not depend on these tables, but authentication challenges, account/device enrollment, browser sessions and other D1-backed routes do.
 - `D1_MIGRATION_APPROVAL.txt` remains `NO`. No migration is authorized.
 
 ## Durable backup status
@@ -69,7 +69,7 @@ Important limitations:
 5. Run a fresh read-only D1 preflight with the signed-URL log suppression in place; verify target UUID, remote migration list, Time Travel bookmark and durable private backup.
 6. Present exact migration 0011 SQL, affected objects, target UUID, backup ID/hash, recovery procedure and command. Obtain explicit owner approval before any remote D1 write.
 7. Apply only approved migration 0011 to the hard-coded disposable D1 UUID and verify migration history, table, columns, indexes and foreign keys.
-8. Current Worker/browser assets are already deployed to `neo-api-disposable-staging` and health is green. After migration 0011 is safely applied, verify real Google login, session issue/resume/logout and device operations.
+8. Current Worker/browser assets are deployed and health is green. After the full 0001–0011 migration sequence is safely applied to the disposable D1, verify real Google login, session issue/resume/logout and device operations.
 9. Test challenge replay, device proof replay, revocation, memory sync, task lease conflicts and zero-budget provider blocking.
 10. Reset approval to `NO`; revoke/remove the temporary broad migration credential after its use/expiry.
 

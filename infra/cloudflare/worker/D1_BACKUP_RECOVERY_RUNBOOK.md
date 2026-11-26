@@ -1,54 +1,61 @@
 # NEO disposable D1 backup and recovery runbook
 
-Status: encrypted GitHub artifact recovery rehearsal added; real staging backup and restore remain unverified.
+Status as of 2026-11-27: **real staging backup and restore are blocked; no NEO migrations have been applied to the remote database.**
 
-## Security model and limitations
+## Scope and protected resources
 
-- Repository is public. Never upload plaintext SQL, credentials, private keys, database contents, or unencrypted backups to repository files, commits, issues, PR comments, or logs.
-- GitHub Actions artifacts are short-lived test/rehearsal transport, not durable backups or a substitute for a separately controlled backup system. Access is tied to repository permissions; repository collaborators and authorized readers may access artifacts. Review repository access and artifact retention settings.
-- This repository workflow uses only a synthetic SQLite fixture. It has no Cloudflare credentials and never exports, reads, or writes remote D1.
-- The private age key for the rehearsal is generated on the ephemeral runner, used only in that run, and is never uploaded or committed. This ephemeral key is intentionally not a reusable backup key.
-- Do not store a long-lived private decryption key in the repository, GitHub Actions secrets, workflow artifacts, logs, or runner cache. A real backup design requires an owner-held offline key and a controlled recovery procedure.
-- R2 is not a mandatory dependency for this rehearsal or for checksum/decryption/isolated restore tests.
+- Source: disposable Cloudflare D1 database `neo-staging-db`, UUID `dd4c03d6-a286-4ac9-abbc-8f162b692acc`.
+- Recovery must use a separate disposable D1 database and a separate credential. Never restore over the source database.
+- The repository is public. Never place plaintext SQL, database rows, credentials, signed URLs, private keys, or unencrypted backups in repository files, commits, issues, pull requests, logs, or public Actions artifacts.
+- The age private key remains owner-held/offline. Only its public age recipient may be stored as a GitHub Actions variable. Never put the private key in GitHub secrets, the repository, a runner, an artifact, or chat.
+- No bucket, credential, or recovery database may be created by this workflow. If the existing private R2 bucket and least-privilege credentials cannot be proven, stop before backup or migration.
 
-## Rehearsal workflow
+## Latest read-only preflight evidence
 
-Manually run `.github/workflows/neo-d1-artifact-recovery-rehearsal.yml` from the engineering branch.
+Workflow run [#45910522233](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45910522233), job `140217498701`, completed successfully:
 
-It:
-1. Builds a small synthetic SQLite database and SQL dump on the runner.
-2. Generates a throwaway age key pair on the runner.
-3. Encrypts the SQL before artifact upload.
-4. Uploads only ciphertext and its SHA-256 checksum with one-day retention.
-5. Downloads the artifact.
-6. Verifies ciphertext checksum.
-7. Decrypts with the ephemeral key held only on the runner.
-8. Restores to a separate local SQLite file and validates fixture rows.
-9. Reports that it is a synthetic rehearsal, not a real staging backup.
+1. Confirmed the D1 UUID matches the hard-coded disposable target.
+2. Retrieved a D1 Time Travel bookmark.
+3. Exported SQL to the ephemeral runner; Wrangler output was redirected so its short-lived signed download URL was not written to public logs.
+4. Inspected the remote migration list: **migrations 0001–0011 are pending**.
+5. Skipped R2 upload and skipped all schema writes. No remote migration was applied.
+6. `infra/cloudflare/D1_MIGRATION_APPROVAL.txt` is `NO`.
 
-## Real D1 backup readiness remains blocked
+The export was temporary runner data, not a durable backup. A Time Travel bookmark is not a substitute for the required encrypted, independently recoverable backup.
 
-Latest read-only preflight: [workflow run #45910522233](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45910522233). It verified database `neo-staging-db` / `dd4c03d6-a286-4ac9-abbc-8f162b692acc`, recorded a Time Travel bookmark, completed a private ephemeral SQL export, and found all migrations 0001–0011 pending. The run explicitly skipped backup upload and migration application; no schema changes were made. The Worker health route is green, but database-backed NEO routes remain unavailable until the full migration set is safely applied.
+## Current workflow limitation — do not use APPLY to obtain a backup
 
+The current `.github/workflows/neo-disposable-staging.yml` has two relevant behaviors:
 
-**Important workflow gap:** the current approval-gated D1 workflow has no backup-only mode. Its preflight exports SQL only to the ephemeral runner and does not retain an encrypted backup. Its encrypted R2 backup step is gated by `APPLY_0001_0011` and is followed by schema migrations. Do not set that approval value merely to obtain a backup; doing so also authorizes migration execution. A separate backup-only job must be implemented and reviewed before a real backup can be taken safely.
+- `PREFLIGHT_ONLY` verifies the target, exports SQL to the ephemeral runner, lists migrations, and skips R2 upload and schema writes.
+- `APPLY_0001_0011` enables the R2 encryption/upload/download-checksum step and then immediately applies migrations 0001–0011 when that step succeeds.
 
-Required owner-controlled prerequisites for that separate job:
-- An age key pair generated and retained by the owner; publish only the age **recipient** (public key) as a GitHub Actions variable. Keep the private key offline and never paste it into chat, GitHub, workflow secrets or logs.
-- A private R2 bucket and narrowly scoped R2 object credentials for that bucket.
-- A D1 export credential scoped to the exact disposable database, with read/export access only.
-- A separately created disposable recovery D1 database and a separate credential scoped to that recovery target. Never use the source database as the restore target.
+There is **no backup-only mode and no pause for owner-held decryption plus isolated restore verification**. Therefore the existing apply path cannot satisfy the required backup → download/checksum → owner decrypt → separate restore rehearsal → migration sequence. Do not set `APPLY_0001_0011` merely to get a backup.
 
-This rehearsal proves a workflow pattern only. It does not prove that a Cloudflare D1 export is complete, that a real backup can be retained securely, or that an owner-held key can recover staging data.
+The existing apply workflow also does not yet provide a complete post-migration proof of all 11 migration-history entries and every foreign-key definition. Its current checks cover a subset of core tables, provider/OIDC triggers, and browser-session indexes. A future apply run must strengthen and record the full schema verification before it can be considered complete.
 
-Before any migration approval:
-- Design and review a real export pipeline, with export commands and logs inspected for accidental exposure of signed URLs or SQL.
-- Encrypt export before upload, using a securely managed recipient public key; private key must remain offline/owner-held and never be stored in the repository or Actions secrets.
-- Consider artifact access restrictions, short retention, retention policy, repository visibility, size limits, deletion behavior, and backup durability. Do not treat a public repository artifact as a durable backup.
-- Verify checksum after download, decrypt locally with owner-held key, and restore into an independent disposable D1 database.
-- Verify migration history, schema, representative rows, constraints, and foreign keys.
-- Keep the real staging D1 untouched during the rehearsal.
+## Credentials and R2 status
+
+- The last successful preflight used the existing D1 migration credential for read/export. The previously inspected token had account-wide D1 Write scope because Cloudflare's permission UI did not offer the desired database-level selector. That is not an acceptable least-privilege credential for this recovery operation. Do not reuse it as a workaround or broaden any permission.
+- The preflight did not run the R2 step. The repository has no successful evidence of an R2 upload, R2 download, or owner-held restore. The current GitHub connector cannot reveal secret values or enumerate the Cloudflare account's R2 buckets, so an unexecuted step must not be treated as proof that the bucket or credentials exist.
+- Required before proceeding: an existing private R2 bucket; bucket-scoped Object Read + Object Write credentials only; a D1 read/export credential restricted as narrowly as Cloudflare permits to the exact disposable source; the public age recipient; and a separate disposable recovery D1 target with a separately scoped credential.
+- Do not reuse the Worker deployment token for D1 or R2. Do not use the broad D1 Write token for a backup. Do not create a new bucket, recovery database, or broader token under this authorization.
+
+## Required recovery sequence
+
+1. Add a separate, reviewed **backup-only** workflow path. It must use read/export-only D1 access and bucket-scoped R2 object access; it must never apply migrations.
+2. Verify the exact source UUID before export. Keep Wrangler's signed export URL and SQL output out of logs.
+3. Encrypt the SQL on the ephemeral runner with the owner's public age recipient before upload. Upload only ciphertext to the existing private R2 bucket.
+4. Download the same object again and verify the ciphertext SHA-256. Record the object key, source UUID, ciphertext hash, UTC time, and workflow run ID.
+5. Owner downloads the ciphertext and decrypts it offline using the owner-held private key. Never transmit that key to the runner.
+6. Restore the decrypted SQL into a different disposable recovery D1 database, not the source. Verify the restore's migration history, tables, indexes, triggers, foreign-key definitions, and `PRAGMA foreign_key_check`; retain evidence tied to the same backup object and hash.
+7. Only after that restore is proven may the already-authorized disposable-source migration sequence be enabled. The apply workflow must verify that its restore attestation refers to the exact backup hash and source UUID, re-check the target UUID, apply only migrations 0001–0011, and leave the approval file at `NO` afterwards.
+8. Verify all 11 migration-history entries; all expected tables, indexes and triggers; expected foreign-key relationships; and zero foreign-key violations. Do not enable scheduled maintenance until verification is complete.
+
+## Synthetic artifact rehearsal is not staging recovery
+
+`.github/workflows/neo-d1-artifact-recovery-rehearsal.yml` creates a synthetic local SQLite fixture, encrypts it with an ephemeral throwaway key, uploads ciphertext and checksum as a one-day GitHub Actions artifact, downloads it, verifies the checksum, decrypts it, and restores the fixture to another local SQLite file. It has no Cloudflare credentials and does not read or write remote D1. Its ephemeral key is not the owner's recovery key. This only exercises a pipeline pattern; it is not a backup or restore of `neo-staging-db`.
 
 ## Approval boundary
 
-This workflow does not authorize remote D1 export, restore, schema changes, migrations, Worker deployment, billing activation, or production actions. Those remain separately gated.
+Keep `D1_MIGRATION_APPROVAL.txt` at `NO` until the backup and isolated restore are independently proven. No remote schema write, migration, production deployment, billing change, paid model-provider activation, or change to the separate Supabase physiotherapy project is authorized by this runbook.

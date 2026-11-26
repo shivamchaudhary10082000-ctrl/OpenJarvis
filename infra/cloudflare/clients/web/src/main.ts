@@ -67,6 +67,7 @@ async function connect() {
     const account = await NeoDeviceClient.resolveAccountScope(baseUrl, identityToken);
     const device = await NeoDeviceClient.create(baseUrl, identityToken, account);
     await device.enrol("NEO Browser", "browser", ["chat", "memory.sync"]);
+    googleIdToken = null;
     await device.heartbeat();
     client = device;
     setConnected("Browser device · " + device.deviceId.slice(0, 8));

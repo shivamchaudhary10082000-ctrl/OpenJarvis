@@ -137,6 +137,15 @@ export async function createDeviceIdentity():Promise<StoredIdentity>{
 
 export class NeoDeviceClient {
   private constructor(private baseUrl:string,private accessToken:(()=>Promise<string>)|undefined,private identity:StoredIdentity,private scopeKey:string){}
+  static async resolveBrowserSession(baseUrl:string):Promise<{account_id:string;device_id:string;expires_at:number}>{
+    const normalizedBase=baseUrl.endsWith("/")?baseUrl.slice(0,-1):baseUrl;
+    const response=await fetch(normalizedBase+"/v1/session",{method:"GET",credentials:"same-origin",cache:"no-store"});
+    if(!response.ok)throw new Error("NEO browser session is unavailable: "+response.status);
+    const payload=await response.json() as {account_id?:unknown;device_id?:unknown;expires_at?:unknown;session_type?:unknown};
+    if(typeof payload.account_id!=="string"||typeof payload.device_id!=="string"||typeof payload.expires_at!=="number"||payload.session_type!=="browser")
+      throw new Error("NEO returned an incomplete browser session");
+    return {account_id:payload.account_id,device_id:payload.device_id,expires_at:payload.expires_at};
+  }
   static async resolveAccountScope(baseUrl:string,accessToken?:(()=>Promise<string>)):Promise<string>{
     const normalizedBase=baseUrl.endsWith("/")?baseUrl.slice(0,-1):baseUrl;
     const headers=new Headers();
@@ -171,7 +180,16 @@ export class NeoDeviceClient {
     if(this.accessToken)headers.set("authorization","Bearer "+await this.accessToken());
     const response=await fetch(this.baseUrl+"/v1/devices",{method:"POST",headers,body:JSON.stringify({label,platform,public_key_jwk:this.identity.publicJwk,capabilities}),credentials:"same-origin"});
     if(!response.ok) throw new Error("NEO device enrolment failed: "+response.status);
-    return response.json();
+    const result=await response.json();
+    // The Worker sets the HttpOnly cookie only for verified Google browser enrolment.
+    // From this point browser requests rely on the cookie plus P-256 proof, never the ID token.
+    if(platform==="browser")this.accessToken=undefined;
+    return result;
+  }
+  async logout():Promise<void>{
+    const response=await fetch(this.baseUrl+"/v1/auth/logout",{method:"POST",credentials:"same-origin",cache:"no-store"});
+    if(!response.ok&&response.status!==204)throw new Error("NEO browser logout failed: "+response.status);
+    this.accessToken=undefined;
   }
   async request(path:string,init:RequestInit={}):Promise<Response>{
     const method=(init.method||"GET").toUpperCase(), url=new URL(this.baseUrl+"/v1"+path);

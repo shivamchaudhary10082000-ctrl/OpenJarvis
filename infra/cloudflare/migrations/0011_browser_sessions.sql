@@ -22,3 +22,8 @@ CREATE INDEX IF NOT EXISTS browser_sessions_by_device
 
 CREATE INDEX IF NOT EXISTS browser_sessions_by_expiry
   ON browser_sessions(expires_at);
+
+-- One live browser session per browser device; re-authentication rotates it.
+CREATE UNIQUE INDEX IF NOT EXISTS browser_sessions_one_active_per_device
+  ON browser_sessions(device_id) WHERE revoked_at IS NULL;
+

@@ -20,6 +20,7 @@ servers:
 security:
   - neoIdentityBearer: []
   - cloudflareAccessAssertion: []
+  - neoBrowserSession: []
 paths:
   /health:
     get:
@@ -84,20 +85,51 @@ paths:
     get:
       operationId: getSessionIdentity
       summary: Resolve the authenticated account subject for browser storage bootstrap
-      description: Returns only the verified Google OIDC or Cloudflare Access account subject. No device proof is required before first enrolment. The response is not cacheable.
+      description: With a valid HttpOnly browser cookie, returns the account and device session scope. Otherwise accepts a verified Google OIDC or Cloudflare Access identity token to bootstrap first enrolment. Responses are not cacheable.
       responses:
         "200":
-          description: Verified account scope for the signed-in identity session
+          description: Verified identity bootstrap or active browser session
           content:
             application/json:
               schema:
                 type: object
-                required: [account_id]
+                required: [account_id, session_type]
                 properties:
                   account_id:
                     type: string
+                  session_type:
+                    enum: [identity_bootstrap, browser]
+                  device_id:
+                    type: string
+                    description: Present only for an active browser session.
+                  expires_at:
+                    type: integer
+                    description: Idle expiry timestamp for the browser session.
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /auth/logout:
+    post:
+      operationId: logoutBrowserSession
+      security:
+        - neoBrowserSession: []
+      summary: Revoke the current browser session and clear its cookie
+      description: Requires an exact same-origin Origin header and rejects cross-site Fetch Metadata. Revokes the server-side session hash and clears the HttpOnly cookie.
+      parameters:
+        - name: Origin
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: Sec-Fetch-Site
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Browser session revoked and cookie cleared.
+        "403":
+          description: Cross-origin logout rejected.
   /devices:
     get:
       operationId: listDevices
@@ -151,8 +183,14 @@ paths:
                   items:
                     type: string
       responses:
+        "200":
+          description: Existing matching device verified; a browser session may be rotated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceEnrollment"
         "201":
-          description: Device enrolled
+          description: Device enrolled; a verified browser enrollment also issues an HttpOnly session cookie.
           content:
             application/json:
               schema:
@@ -613,6 +651,11 @@ components:
       in: header
       name: Cf-Access-Jwt-Assertion
       description: Signed assertion injected by Cloudflare Access for protected browser requests. Browser JavaScript must not read or set this header.
+    neoBrowserSession:
+      type: apiKey
+      in: cookie
+      name: __Host-neo_session
+      description: Opaque, revocable browser session. The Worker stores only its SHA-256 hash. Protected browser API requests still require X-NEO-Device-ID and P-256 request-proof headers.
   parameters:
     DeviceId:
       name: X-NEO-Device-ID
@@ -666,6 +709,9 @@ components:
           type: string
         status:
           const: enrolled
+        session_type:
+          const: browser
+          description: Present only when a browser session cookie was issued.
     Device:
       type: object
       required: [device_id, label, platform, status, capabilities]

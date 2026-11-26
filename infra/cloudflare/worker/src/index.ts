@@ -505,7 +505,7 @@ async function route(req: Request, env: Env): Promise<Response> {
         }
         if (x.platform === "browser" && (claims.iss === "https://accounts.google.com" || claims.iss === "accounts.google.com")) {
           const session = await issueBrowserSession(env, claims.sub, deviceId, x.public_key_jwk as JsonWebKey);
-          return json({ device_id: deviceId, account_id: claims.sub, status: "enrolled" }, 200, {
+          return json({ device_id: deviceId, account_id: claims.sub, status: "enrolled", session_type: "browser" }, 200, {
             "set-cookie": browserSessionCookieHeader(session.token, session.expiresAt - now()),
           });
         }
@@ -517,7 +517,7 @@ async function route(req: Request, env: Env): Promise<Response> {
         .bind(id(), claims.sub, deviceId, "device.enrolled", now()).run();
       if (x.platform === "browser" && (claims.iss === "https://accounts.google.com" || claims.iss === "accounts.google.com")) {
         const session = await issueBrowserSession(env, claims.sub, deviceId, x.public_key_jwk as JsonWebKey);
-        return json({ device_id: deviceId, account_id: claims.sub, status: "enrolled" }, 201, {
+        return json({ device_id: deviceId, account_id: claims.sub, status: "enrolled", session_type: "browser" }, 201, {
           "set-cookie": browserSessionCookieHeader(session.token, session.expiresAt - now()),
         });
       }
@@ -531,7 +531,8 @@ async function route(req: Request, env: Env): Promise<Response> {
   try { auth = await authenticate(req, env); } catch (e) {
     if (e instanceof RateLimitExceeded) return fail(429, "rate_limited", "Account request rate limit exceeded; retry after the current minute");
     const message = e instanceof Error ? e.message : "Authentication failed";
-    return fail(message.includes("revoked") || message.includes("not enrolled") || message.includes("cross-origin") || message.includes("device mismatch") || message.includes("key changed") ? 403 : 401, "unauthorized", message);
+    const normalizedMessage = message.toLowerCase();
+    return fail(normalizedMessage.includes("revoked") || normalizedMessage.includes("not enrolled") || normalizedMessage.includes("cross-origin") || normalizedMessage.includes("device mismatch") || normalizedMessage.includes("key changed") ? 403 : 401, "unauthorized", message);
   }
   const { account, device } = auth;
   try {

@@ -34,7 +34,7 @@ Voice requests require VOICE_TRANSCRIBE_MAX_COST_USD_MICROS or VOICE_SYNTHESIS_M
 
 Run npm install, Redocly OpenAPI lint, npm run check, npm run deploy:dry-run and npm test.
 
-Vitest runs in the Cloudflare Workers runtime with local SQLite-backed D1 and applies migrations 0001–0011. Verified code run #229 passed 70 Worker tests and 9/9 Playwright browser persistence tests. On the current branch head, Redocly OpenAPI lint, TypeScript check, Wrangler deploy dry-run and all 70 Worker tests have passed; the fresh Playwright matrix is still running. Local integration evidence is not remote D1 or staging proof.
+Vitest runs in the Cloudflare Workers runtime with local SQLite-backed D1 and applies migrations 0001–0011. The latest verified Worker CI run on commit `3dec68a` passed Redocly OpenAPI lint, TypeScript check, Wrangler deploy dry-run, all 73 Worker tests, and all 9 Playwright browser persistence tests across Chromium, Firefox and WebKit. These are local/integration tests, not proof of remote D1 migration state or live Google OAuth enrollment.
 
 ## Offline clients
 

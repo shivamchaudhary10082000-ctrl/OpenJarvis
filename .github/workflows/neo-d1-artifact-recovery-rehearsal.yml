@@ -1,6 +1,11 @@
 name: NEO encrypted D1 backup artifact rehearsal
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - neo/foundation-architecture
+    paths:
+      - .github/workflows/neo-d1-artifact-recovery-rehearsal.yml
 permissions:
   contents: read
   actions: read

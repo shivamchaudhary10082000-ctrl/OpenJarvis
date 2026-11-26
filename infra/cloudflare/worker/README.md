@@ -1,6 +1,6 @@
 # NEO Cloudflare Worker
 
-This is the executable NEO API gateway implementation. A previous Worker version is deployed to the disposable staging Worker; the latest branch code is not yet deployed. The remote D1 schema and authenticated data paths are not yet verified, so it is **not production-ready**.
+This is the executable NEO API gateway implementation. Branch head `e63c6c97b01c420915d6dc0cff236bbeef3db467` was deployed to the disposable staging Worker by workflow run [#45909896048](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45909896048). The deployment health probe returned `status=ok` for `disposable-staging` (Worker version `5ffdb1a6-390a-483a-a2c2-052d11e9ecf7`). The remote D1 schema has not been migrated to 0011 and authenticated browser/session paths are not yet verified live, so this is **not production-ready**.
 
 ## Implemented routes and controls
 
@@ -34,7 +34,7 @@ Voice requests require VOICE_TRANSCRIBE_MAX_COST_USD_MICROS or VOICE_SYNTHESIS_M
 
 Run npm install, Redocly OpenAPI lint, npm run check, npm run deploy:dry-run and npm test.
 
-Vitest runs in the Cloudflare Workers runtime with local SQLite-backed D1 and applies migrations 0001–0011. The latest verified Worker CI run on commit `3dec68a` passed Redocly OpenAPI lint, TypeScript check, Wrangler deploy dry-run, all 73 Worker tests, and all 9 Playwright browser persistence tests across Chromium, Firefox and WebKit. These are local/integration tests, not proof of remote D1 migration state or live Google OAuth enrollment.
+Vitest runs in the Cloudflare Workers runtime with local SQLite-backed D1 and applies migrations 0001–0011. On branch head `e63c6c97b01c420915d6dc0cff236bbeef3db467`, Worker CI run [#45909902664](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45909902664) passed Redocly OpenAPI lint, TypeScript check, Wrangler deploy dry-run, Worker tests, and all 9 Playwright browser persistence tests across Chromium, Firefox and WebKit. Android unit and emulator instrumentation jobs also passed in run [#45909902711](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45909902711). These are local/integration tests, not proof of remote D1 migration state or live Google OAuth enrollment.
 
 ## Offline clients
 
@@ -51,7 +51,7 @@ The Android transport/storage primitive and a diagnostic Gradle harness now exis
 2. Confirm the existing disposable D1 identity is exactly `neo-staging-db` / `dd4c03d6-a286-4ac9-abbc-8f162b692acc`.
 3. Create a separate Developer Platform Editor token scoped only to that D1 resource. Follow `../D1_STAGING_RUNBOOK.md`; run preflight first, then apply migrations 0001–0011 only after explicit owner approval.
 4. Verify the remote migration list, tables, indexes and triggers. Keep scheduled maintenance disabled until schema verification is complete.
-5. Deploy the latest Worker/browser assets to disposable staging using the separate Worker-only deployment token. Test Google sign-in, one-time challenge/replay rejection, device enrolment, authenticated APIs and revocation.
+5. The current branch head is deployed to disposable staging and its health endpoint passed. After migration 0011 is safely applied to the disposable D1, test Google sign-in, one-time challenge/replay rejection, device enrolment, browser session issue/resume/logout, authenticated APIs and revocation.
 6. Keep provider secrets unset and budgets at zero until a provider/model, current pricing and hard monthly/input/output limits are explicitly approved.
 7. After approval, test real provider usage, failover and settlement with the hard caps enabled.
 8. Test browser/Android device pairing, encrypted memory synchronisation, offline recovery and physical-device behavior. Production remains out of scope.

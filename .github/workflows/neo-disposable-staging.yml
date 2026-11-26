@@ -132,7 +132,7 @@ jobs:
             echo "Preflight-only mode selected; no schema writes will run."
           elif [[ "$approval" == "APPLY_0001_0011" && "$message" == *"[neo-d1-apply]"* ]]; then
             echo "apply=true" >> "$GITHUB_OUTPUT"
-            echo "Explicit approval recorded for migrations 0001–0010 on disposable D1."
+            echo "Explicit approval recorded for migrations 0001–0011 on disposable D1."
           else
             echo "::error::Approval file and commit message do not match an allowed action. Use PREFLIGHT_ONLY with [neo-d1-preflight], or APPLY_0001_0011 with [neo-d1-apply]."
             exit 1
@@ -276,8 +276,8 @@ jobs:
           npx wrangler d1 execute neo-staging-db --remote --json --command "SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('provider_token_budget_reserve_before_insert','oidc_login_challenge_rate_limit')" --config ../wrangler.disposable.toml > /tmp/neo-d1-triggers.json
           grep -q "provider_token_budget_reserve_before_insert" /tmp/neo-d1-triggers.json
           grep -q "oidc_login_challenge_rate_limit" /tmp/neo-d1-triggers.json
-          npx wrangler d1 execute neo-staging-db --remote --json --command "SELECT name FROM sqlite_master WHERE type='index' AND name IN ('browser_sessions_by_account','browser_sessions_by_device','browser_sessions_by_expiry')" --config ../wrangler.disposable.toml > /tmp/neo-d1-session-indexes.json
-          for name in browser_sessions_by_account browser_sessions_by_device browser_sessions_by_expiry; do
+          npx wrangler d1 execute neo-staging-db --remote --json --command "SELECT name FROM sqlite_master WHERE type='index' AND name IN ('browser_sessions_by_account','browser_sessions_by_device','browser_sessions_by_expiry','browser_sessions_one_active_per_device')" --config ../wrangler.disposable.toml > /tmp/neo-d1-session-indexes.json
+          for name in browser_sessions_by_account browser_sessions_by_device browser_sessions_by_expiry browser_sessions_one_active_per_device; do
             grep -q "$name" /tmp/neo-d1-session-indexes.json || {
               echo "::error::Expected browser session index missing after migration: $name"; exit 1;
             }

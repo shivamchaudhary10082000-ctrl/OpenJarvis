@@ -60,13 +60,13 @@ jobs:
       - name: Verify checksum, decrypt, restore to isolated SQLite, and validate
         run: |
           set -euo pipefail
-          cd /tmp/neo-recovery-download
+          cd /tmp/neo-recovery-download/neo-d1-recovery-rehearsal-${GITHUB_RUN_ID}
           sha256sum -c ciphertext.sha256
-          age -d -i /tmp/neo-backup-fixture/test-key.txt -o /tmp/neo-recovery-download/restored.sql fixture.sql.age
-          test -s /tmp/neo-recovery-download/restored.sql
-          sqlite3 /tmp/neo-recovery-download/restored.db < /tmp/neo-recovery-download/restored.sql
-          test "$(sqlite3 /tmp/neo-recovery-download/restored.db 'SELECT COUNT(*) FROM rehearsal_records;')" = "2"
-          test "$(sqlite3 /tmp/neo-recovery-download/restored.db "SELECT label FROM rehearsal_records WHERE id=2;")" = "fixture-beta"
+          age -d -i /tmp/neo-backup-fixture/test-key.txt -o restored.sql fixture.sql.age
+          test -s restored.sql
+          sqlite3 restored.db < restored.sql
+          test "$(sqlite3 restored.db 'SELECT COUNT(*) FROM rehearsal_records;')" = "2"
+          test "$(sqlite3 restored.db "SELECT label FROM rehearsal_records WHERE id=2;")" = "fixture-beta"
           echo "Checksum verified, decrypted, isolated restore succeeded, and fixture data validated."
       - name: Summary
         run: |

@@ -245,7 +245,16 @@ describe("D1-backed Access and device proof", () => {
 
   it("issues a hashed HttpOnly browser session after Google nonce-bound device enrollment and revokes it on logout", async () => {
     const kid = "neo-google-session-" + crypto.randomUUID();
-    mockGoogleCerts(kid);
+    let unexpectedUpstreamCalls = 0;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      if (String(input) === "https://www.googleapis.com/oauth2/v3/certs") {
+        return new Response(JSON.stringify({ keys: [{ ...googlePublicJwk, kid, alg: "RS256" }] }), {
+          status: 200, headers: { "content-type": "application/json" },
+        });
+      }
+      unexpectedUpstreamCalls++;
+      return new Response("unexpected upstream", { status: 502 });
+    });
     const googleBindings = { DB: bindings.DB, GOOGLE_OAUTH_CLIENT_IDS: "neo-browser-test-client" } as Env;
     const challengeResponse = await worker.fetch(new Request(baseUrl + "/v1/auth/challenge", {
       headers: { "cf-connecting-ip": "192.0.2." + crypto.randomUUID() },
@@ -287,6 +296,30 @@ describe("D1-backed Access and device proof", () => {
     }), googleBindings);
     expect(bootstrap.status).toBe(200);
     expect(await bootstrap.json()).toMatchObject({ account_id: device.account, device_id: deviceId, session_type: "browser" });
+
+    // Prove that the resumed browser session authenticates a signed request.
+    const sessionHeartbeat = await signedRequest(device, "/v1/devices/heartbeat", {
+      method: "POST",
+      headers: { cookie: "__Host-neo_session=" + rawSession, origin: baseUrl, "sec-fetch-site": "same-origin" },
+    });
+    expect((await worker.fetch(sessionHeartbeat, googleBindings)).status).toBe(200);
+
+    // No provider URL/key or spend budget is present in this isolated test binding.
+    // The authenticated chat route must fail closed without making an upstream call.
+    const noProviderChat = await signedRequest(device, "/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: "__Host-neo_session=" + rawSession,
+        origin: baseUrl,
+        "sec-fetch-site": "same-origin",
+      },
+      body: JSON.stringify({ messages: [{ role: "user", content: "Hello NEO" }] }),
+    });
+    const noProviderResponse = await worker.fetch(noProviderChat, googleBindings);
+    expect(noProviderResponse.status).toBe(503);
+    expect(await noProviderResponse.json()).toMatchObject({ error: { code: "model_unconfigured" } });
+    expect(unexpectedUpstreamCalls).toBe(0);
 
     const crossOriginRequest = await signedRequest(device, "/v1/devices/heartbeat", { method: "POST" });
     crossOriginRequest.headers.set("cookie", "__Host-neo_session=" + rawSession);

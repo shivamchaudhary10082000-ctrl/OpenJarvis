@@ -130,11 +130,11 @@ jobs:
           if [[ "$approval" == "PREFLIGHT_ONLY" && "$message" == *"[neo-d1-preflight]"* ]]; then
             echo "apply=false" >> "$GITHUB_OUTPUT"
             echo "Preflight-only mode selected; no schema writes will run."
-          elif [[ "$approval" == "APPLY_0001_0010" && "$message" == *"[neo-d1-apply]"* ]]; then
+          elif [[ "$approval" == "APPLY_0001_0011" && "$message" == *"[neo-d1-apply]"* ]]; then
             echo "apply=true" >> "$GITHUB_OUTPUT"
             echo "Explicit approval recorded for migrations 0001–0010 on disposable D1."
           else
-            echo "::error::Approval file and commit message do not match an allowed action. Use PREFLIGHT_ONLY with [neo-d1-preflight], or APPLY_0001_0010 with [neo-d1-apply]."
+            echo "::error::Approval file and commit message do not match an allowed action. Use PREFLIGHT_ONLY with [neo-d1-preflight], or APPLY_0001_0011 with [neo-d1-apply]."
             exit 1
           fi
 
@@ -163,6 +163,7 @@ jobs:
           0008_provider_token_budgets.sql
           0009_enforce_settled_token_budgets.sql
           0010_oidc_login_challenges.sql
+          0011_browser_sessions.sql
           EOF
           )"
           test "$actual" = "$expected" || {
@@ -266,8 +267,8 @@ jobs:
         run: |
           set -euo pipefail
           npx wrangler d1 migrations list neo-staging-db --remote --config ../wrangler.disposable.toml
-          npx wrangler d1 execute neo-staging-db --remote --json --command "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('accounts','devices','memory_records','task_leases','provider_spend_usage','oidc_login_challenges') ORDER BY name" --config ../wrangler.disposable.toml > /tmp/neo-d1-schema.json
-          for name in accounts devices memory_records task_leases provider_spend_usage oidc_login_challenges; do
+          npx wrangler d1 execute neo-staging-db --remote --json --command "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('accounts','devices','memory_records','task_leases','provider_spend_usage','oidc_login_challenges','browser_sessions') ORDER BY name" --config ../wrangler.disposable.toml > /tmp/neo-d1-schema.json
+          for name in accounts devices memory_records task_leases provider_spend_usage oidc_login_challenges browser_sessions; do
             grep -q "$name" /tmp/neo-d1-schema.json || {
               echo "::error::Expected D1 table missing after migration: $name"; exit 1;
             }
@@ -275,6 +276,12 @@ jobs:
           npx wrangler d1 execute neo-staging-db --remote --json --command "SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('provider_token_budget_reserve_before_insert','oidc_login_challenge_rate_limit')" --config ../wrangler.disposable.toml > /tmp/neo-d1-triggers.json
           grep -q "provider_token_budget_reserve_before_insert" /tmp/neo-d1-triggers.json
           grep -q "oidc_login_challenge_rate_limit" /tmp/neo-d1-triggers.json
+          npx wrangler d1 execute neo-staging-db --remote --json --command "SELECT name FROM sqlite_master WHERE type='index' AND name IN ('browser_sessions_by_account','browser_sessions_by_device','browser_sessions_by_expiry')" --config ../wrangler.disposable.toml > /tmp/neo-d1-session-indexes.json
+          for name in browser_sessions_by_account browser_sessions_by_device browser_sessions_by_expiry; do
+            grep -q "$name" /tmp/neo-d1-session-indexes.json || {
+              echo "::error::Expected browser session index missing after migration: $name"; exit 1;
+            }
+          done
           echo "### D1 migrations applied and critical schema verified" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Confirm preflight-only run made no schema changes

@@ -28,6 +28,14 @@ It:
 
 ## Real D1 backup readiness remains blocked
 
+**Important workflow gap:** the current approval-gated D1 workflow has no backup-only mode. Its preflight exports SQL only to the ephemeral runner and does not retain an encrypted backup. Its encrypted R2 backup step is gated by `APPLY_0001_0011` and is followed by schema migrations. Do not set that approval value merely to obtain a backup; doing so also authorizes migration execution. A separate backup-only job must be implemented and reviewed before a real backup can be taken safely.
+
+Required owner-controlled prerequisites for that separate job:
+- An age key pair generated and retained by the owner; publish only the age **recipient** (public key) as a GitHub Actions variable. Keep the private key offline and never paste it into chat, GitHub, workflow secrets or logs.
+- A private R2 bucket and narrowly scoped R2 object credentials for that bucket.
+- A D1 export credential scoped to the exact disposable database, with read/export access only.
+- A separately created disposable recovery D1 database and a separate credential scoped to that recovery target. Never use the source database as the restore target.
+
 This rehearsal proves a workflow pattern only. It does not prove that a Cloudflare D1 export is complete, that a real backup can be retained securely, or that an owner-held key can recover staging data.
 
 Before any migration approval:

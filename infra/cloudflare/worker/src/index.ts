@@ -333,7 +333,7 @@ async function resolveBrowserSession(req: Request, env: Env): Promise<BrowserSes
   const session = await env.DB.prepare(
     "SELECT session_hash,account_id,device_id,public_key_hash,expires_at,absolute_expires_at,last_seen_at FROM browser_sessions WHERE session_hash=? AND revoked_at IS NULL AND expires_at>? AND absolute_expires_at>?",
   ).bind(hash, now(), now()).first<BrowserSessionRow>();
-  if (!session) throw new Error("Browser session is expired or revoked");
+  if (!session) throw new Error("Browser session is invalid or expired");
   const account = await env.DB.prepare("SELECT status FROM accounts WHERE account_id=?").bind(session.account_id).first<{status:string}>();
   if (!account || account.status !== "active") throw new Error("Browser session account is inactive");
   const device = await env.DB.prepare(

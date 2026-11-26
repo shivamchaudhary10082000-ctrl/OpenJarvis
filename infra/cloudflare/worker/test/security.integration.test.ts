@@ -262,6 +262,8 @@ describe("D1-backed Access and device proof", () => {
         authorization: "Bearer " + token,
         "content-type": "application/json",
         "x-neo-device-id": deviceId,
+        origin: baseUrl,
+        "sec-fetch-site": "same-origin",
       },
       body: JSON.stringify({ label: "Browser session test", platform: "browser", public_key_jwk: publicJwk, capabilities: ["chat"] }),
     }), googleBindings);
@@ -1295,6 +1297,8 @@ describe("Google OIDC identity bootstrap", () => {
         authorization: "Bearer " + identityToken,
         "content-type": "application/json",
         "x-neo-device-id": deviceId,
+        origin: baseUrl,
+        "sec-fetch-site": "same-origin",
       },
       body: JSON.stringify({
         label: "Google nonce test device",
@@ -1345,6 +1349,8 @@ describe("Google OIDC identity bootstrap", () => {
         authorization: "Bearer " + identityToken,
         "content-type": "application/json",
         "x-neo-device-id": crypto.randomUUID().replace(/-/g, ""),
+        origin: baseUrl,
+        "sec-fetch-site": "same-origin",
       },
       body: JSON.stringify({
         label: "Missing nonce test",

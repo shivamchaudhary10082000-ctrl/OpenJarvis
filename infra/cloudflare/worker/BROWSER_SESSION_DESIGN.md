@@ -1,6 +1,6 @@
 # NEO browser session design
 
-Status: design only. No session schema migration or runtime session code is authorized by this document. This is a design gate for the next implementation slice.
+Status: implemented on `neo/foundation-architecture`; not yet live. Migration `0011_browser_sessions.sql` is authored but has **not** been applied to remote D1. Automated regression tests are added; final CI is pending. This document remains the behavior contract for review and release.
 
 ## Goals
 
@@ -51,7 +51,7 @@ Table `browser_sessions`:
 Indexes on `(account_id, revoked_at, expires_at)`, `(device_id, revoked_at, expires_at)`, and `expires_at`.
 No token values, Google ID tokens, or personal profile data are stored.
 
-Before finalizing SQL, confirm existing foreign-key conventions and account/device deletion semantics in migration 0001. New migration filename should be `0011_browser_sessions.sql`; workflow's exact allow-listed migration set must be updated in the same change.
+Migration `0011_browser_sessions.sql` now implements this schema, including foreign keys with cascade deletion, the three lookup/expiry indexes and a partial unique index enforcing one active browser session per device. The staging workflow exact allow-list includes 0011 and checks the table and indexes. This migration is local source only; it has not been applied to remote D1.
 
 ## Required automated tests
 
@@ -70,12 +70,13 @@ Before finalizing SQL, confirm existing foreign-key conventions and account/devi
 
 ## Rollout and recovery
 
-1. Add schema and Worker/client code in one backward-compatible engineering-branch slice.
-2. Run local D1 migration tests and full Worker/Web/Android CI.
-3. Keep the browser on the current bearer flow until the session schema and Worker deployment are live together; then deploy the matching browser assets.
-4. Require a fresh explicit Google sign-in to create the first cookie. Existing enrolled device/key is retained.
-5. If cookie/session verification fails, clear the cookie and require reauthentication; never fall back silently.
-6. Remote D1 migration is a separate owner-approval gate. No D1 write is permitted until exact SQL, target UUID, backup/restore plan and command are presented and approved.
+1. Schema, Worker and browser client implementation are committed together on the engineering branch.
+2. Integration tests cover Google nonce-bound session issuance, cookie attributes, hash-only persistence, same-origin enforcement, logout, device revocation and no bearer fallback. Full Worker/Web/Android CI is still required.
+3. Deploy the matching Worker and browser assets together only after migration 0011 is approved and applied.
+4. A fresh explicit Google sign-in creates the first cookie. An existing enrolled browser device/key is retained when it still matches.
+5. On reload, the browser resolves the HttpOnly cookie session and resumes only if its local non-exportable P-256 key matches the server-bound device ID.
+6. If cookie/session verification fails, the browser falls back to fresh sign-in; it never falls back silently to bearer authentication after a cookie is supplied.
+7. Remote D1 migration is a separate owner-approval gate. No D1 write is permitted until exact SQL, target UUID, durable backup/restore plan and command are presented and approved.
 
 ## Explicit non-goals
 

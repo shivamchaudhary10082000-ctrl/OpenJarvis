@@ -66,7 +66,8 @@ async function connect() {
     };
     const account = await NeoDeviceClient.resolveAccountScope(baseUrl, identityToken);
     const device = await NeoDeviceClient.create(baseUrl, identityToken, account);
-    await device.enrol("NEO Browser", "browser", ["chat", "memory.sync"]);
+    const enrollment = await device.enrol("NEO Browser", "browser", ["chat", "memory.sync"]) as {session_type?:unknown};
+    if (enrollment.session_type !== "browser") throw new Error("NEO did not establish a secure browser session. Please sign in again.");
     googleIdToken = null;
     await device.heartbeat();
     client = device;

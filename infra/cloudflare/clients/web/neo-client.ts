@@ -180,10 +180,9 @@ export class NeoDeviceClient {
     if(this.accessToken)headers.set("authorization","Bearer "+await this.accessToken());
     const response=await fetch(this.baseUrl+"/v1/devices",{method:"POST",headers,body:JSON.stringify({label,platform,public_key_jwk:this.identity.publicJwk,capabilities}),credentials:"same-origin"});
     if(!response.ok) throw new Error("NEO device enrolment failed: "+response.status);
-    const result=await response.json();
-    // The Worker sets the HttpOnly cookie only for verified Google browser enrolment.
-    // From this point browser requests rely on the cookie plus P-256 proof, never the ID token.
-    if(platform==="browser")this.accessToken=undefined;
+    const result=await response.json() as {session_type?:unknown};
+    // Switch off the transient ID token only after the Worker confirms a cookie session.
+    if(platform==="browser"&&result.session_type==="browser")this.accessToken=undefined;
     return result;
   }
   async logout():Promise<void>{

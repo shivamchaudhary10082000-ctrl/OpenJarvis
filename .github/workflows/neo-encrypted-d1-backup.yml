@@ -25,6 +25,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_BACKUP_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       AGE_RECIPIENT: ${{ vars.NEO_BACKUP_AGE_RECIPIENT }}
+      GOOGLE_WEB_CLIENT_ID: ${{ vars.NEO_GOOGLE_WEB_CLIENT_ID }}
       EXPECTED_D1_ID: dd4c03d6-a286-4ac9-abbc-8f162b692acc
     steps:
       - uses: actions/checkout@v7
@@ -50,15 +51,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test -n "$GOOGLE_WEB_CLIENT_ID" || { echo "::error::Missing NEO_GOOGLE_WEB_CLIENT_ID variable."; exit 1; }
           cp infra/cloudflare/wrangler.disposable.example.toml infra/cloudflare/wrangler.disposable.toml
           node --input-type=module <<'NODE'
           import fs from "node:fs";
           const p = "infra/cloudflare/wrangler.disposable.toml";
-          const c = fs.readFileSync(p, "utf8");
+          let c = fs.readFileSync(p, "utf8");
+          const clientId = process.env.GOOGLE_WEB_CLIENT_ID;
+          c = c.replaceAll("REPLACE-WITH-GOOGLE-WEB-CLIENT-ID", clientId);
           for (const x of ['name = "neo-api-disposable-staging"', 'database_name = "neo-staging-db"', 'database_id = "dd4c03d6-a286-4ac9-abbc-8f162b692acc"']) {
             if (!c.includes(x)) throw new Error("Refusing: config identity mismatch: " + x);
           }
           if (c.includes("REPLACE-WITH-") || c.includes("[triggers]")) throw new Error("Placeholder or trigger found");
+          if (!c.includes(`GOOGLE_WEB_CLIENT_ID = "${clientId}"`) || !c.includes(`GOOGLE_OAUTH_CLIENT_IDS = "${clientId}"`)) throw new Error("OAuth client ID replacement failed");
           fs.writeFileSync(p,c);
           NODE
       - name: Verify D1 identity

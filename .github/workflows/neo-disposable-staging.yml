@@ -255,13 +255,58 @@ jobs:
         working-directory: infra/cloudflare/worker
         run: npx wrangler d1 migrations list neo-staging-db --remote --config ../wrangler.disposable.toml
 
-      - name: Apply migrations only when explicitly approved
+      - id: backup
+        name: Encrypt and retain a private backup before any D1 apply
         if: steps.approval.outputs.apply == 'true'
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.NEO_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.NEO_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_NAME: ${{ vars.NEO_R2_BUCKET_NAME }}
+          AGE_RECIPIENT: ${{ vars.NEO_BACKUP_AGE_RECIPIENT }}
+        run: |
+          set -euo pipefail
+          test -n "$AWS_ACCESS_KEY_ID" || { echo "::error::NEO_R2_ACCESS_KEY_ID secret is missing."; exit 1; }
+          test -n "$AWS_SECRET_ACCESS_KEY" || { echo "::error::NEO_R2_SECRET_ACCESS_KEY secret is missing."; exit 1; }
+          [[ "$R2_BUCKET_NAME" =~ ^[a-z0-9-]{3,63}$ ]] || { echo "::error::NEO_R2_BUCKET_NAME variable is missing or invalid."; exit 1; }
+          [[ "$AGE_RECIPIENT" == age1* ]] || { echo "::error::NEO_BACKUP_AGE_RECIPIENT variable is missing or invalid."; exit 1; }
+          command -v aws >/dev/null || { echo "::error::AWS CLI is unavailable on this runner."; exit 1; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq age
+          age --encrypt --recipient "$AGE_RECIPIENT" --output /tmp/neo-staging-pre-migration.sql.age /tmp/neo-staging-pre-migration.sql
+          test -s /tmp/neo-staging-pre-migration.sql.age
+          checksum="$(sha256sum /tmp/neo-staging-pre-migration.sql.age | awk '{print $1}')"
+          object_key="neo-staging-d1/$(date -u +%Y/%m/%d)/neo-staging-db-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sql.age"
+          endpoint="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          export AWS_DEFAULT_REGION=auto AWS_EC2_METADATA_DISABLED=true
+          aws s3 cp /tmp/neo-staging-pre-migration.sql.age "s3://${R2_BUCKET_NAME}/${object_key}" \
+            --endpoint-url "$endpoint" --no-progress --only-show-errors \
+            --metadata "database-id=${EXPECTED_D1_ID},commit=${GITHUB_SHA},sha256=${checksum}"
+          aws s3 cp "s3://${R2_BUCKET_NAME}/${object_key}" /tmp/neo-staging-backup-verify.sql.age \
+            --endpoint-url "$endpoint" --no-progress --only-show-errors
+          remote_checksum="$(sha256sum /tmp/neo-staging-backup-verify.sql.age | awk '{print $1}')"
+          test "$checksum" = "$remote_checksum" || { echo "::error::Uploaded encrypted backup checksum does not match."; exit 1; }
+          test -s /tmp/neo-staging-backup-verify.sql.age
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Encrypted private D1 backup"
+            echo ""
+            echo "- Bucket: `$R2_BUCKET_NAME`"
+            echo "- Object: `$object_key`"
+            echo "- Ciphertext SHA-256: `$checksum`"
+            echo "- Upload/download checksum: verified"
+            echo "- Database: `$EXPECTED_D1_ID`"
+            echo "- **Owner-held decryption and isolated restore rehearsal remain mandatory before migration approval.**"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Apply migrations only when explicitly approved and backup is verified
+        if: steps.approval.outputs.apply == 'true' && steps.backup.outputs.ready == 'true'
         working-directory: infra/cloudflare/worker
         run: npx wrangler d1 migrations apply neo-staging-db --remote --config ../wrangler.disposable.toml
 
       - name: Verify final migration state and critical schema objects
-        if: steps.approval.outputs.apply == 'true'
+        if: steps.approval.outputs.apply == 'true' && steps.backup.outputs.ready == 'true'
         working-directory: infra/cloudflare/worker
         shell: bash
         run: |
@@ -286,4 +331,4 @@ jobs:
 
       - name: Confirm preflight-only run made no schema changes
         if: steps.approval.outputs.apply != 'true'
-        run: echo "Preflight and backup completed. No D1 migrations were applied." >> "$GITHUB_STEP_SUMMARY"
+        run: echo "Read-only preflight completed. No D1 migrations were applied." >> "$GITHUB_STEP_SUMMARY"

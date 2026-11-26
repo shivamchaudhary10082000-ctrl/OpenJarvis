@@ -317,6 +317,9 @@ async function issueBrowserSession(
   const absoluteExpiresAt = timestamp + browserSessionAbsoluteSeconds;
   const expiresAt = Math.min(timestamp + browserSessionIdleSeconds, absoluteExpiresAt);
   const token = encodeBytesBase64Url(crypto.getRandomValues(new Uint8Array(32)));
+  // A browser device has one active server session. Rotate it on re-authentication.
+  await env.DB.prepare("UPDATE browser_sessions SET revoked_at=? WHERE device_id=? AND revoked_at IS NULL")
+    .bind(timestamp, deviceId).run();
   await env.DB.prepare(
     "INSERT INTO browser_sessions(session_hash,account_id,device_id,public_key_hash,created_at,last_seen_at,expires_at,absolute_expires_at) VALUES(?,?,?,?,?,?,?,?)",
   ).bind(await sha256Hex(token), accountId, deviceId, await browserPublicKeyHash(publicKeyJwk), timestamp, timestamp, expiresAt, absoluteExpiresAt).run();

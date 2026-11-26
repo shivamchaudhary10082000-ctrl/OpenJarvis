@@ -167,7 +167,7 @@ jobs:
           EOF
           )"
           test "$actual" = "$expected" || {
-            echo "::error::The checked-in migration set differs from the reviewed 0001–0010 set. Stop and review."; exit 1;
+            echo "::error::The checked-in migration set differs from the reviewed 0001–0011 set. Stop and review."; exit 1;
           }
 
       - name: Install pinned Wrangler

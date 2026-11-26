@@ -28,6 +28,9 @@ It:
 
 ## Real D1 backup readiness remains blocked
 
+Latest read-only preflight: [workflow run #45910522233](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45910522233). It verified database `neo-staging-db` / `dd4c03d6-a286-4ac9-abbc-8f162b692acc`, recorded a Time Travel bookmark, completed a private ephemeral SQL export, and found all migrations 0001–0011 pending. The run explicitly skipped backup upload and migration application; no schema changes were made. The Worker health route is green, but database-backed NEO routes remain unavailable until the full migration set is safely applied.
+
+
 **Important workflow gap:** the current approval-gated D1 workflow has no backup-only mode. Its preflight exports SQL only to the ephemeral runner and does not retain an encrypted backup. Its encrypted R2 backup step is gated by `APPLY_0001_0011` and is followed by schema migrations. Do not set that approval value merely to obtain a backup; doing so also authorizes migration execution. A separate backup-only job must be implemented and reviewed before a real backup can be taken safely.
 
 Required owner-controlled prerequisites for that separate job:

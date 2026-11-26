@@ -241,9 +241,14 @@ jobs:
       - name: Export pre-migration SQL backup to ephemeral runner
         working-directory: infra/cloudflare/worker
         run: |
-          npx wrangler d1 export neo-staging-db --remote --output=/tmp/neo-staging-pre-migration.sql --config ../wrangler.disposable.toml
+          # Wrangler prints a short-lived, signed R2 download URL during export.
+          # Keep all CLI output off public Actions logs; report only success/failure.
+          if ! npx wrangler d1 export neo-staging-db --remote --output=/tmp/neo-staging-pre-migration.sql --config ../wrangler.disposable.toml >/tmp/neo-d1-export.log 2>&1; then
+            echo "::error::D1 export failed. CLI output was withheld to avoid exposing temporary signed download URLs in public logs."
+            exit 1
+          fi
           test -s /tmp/neo-staging-pre-migration.sql
-          echo "SQL export verified on ephemeral runner; it will not be uploaded to this public repository."
+          echo "SQL export verified on ephemeral runner; CLI output and backup remain private to the ephemeral runner."
 
       - name: Show current remote migration state
         working-directory: infra/cloudflare/worker

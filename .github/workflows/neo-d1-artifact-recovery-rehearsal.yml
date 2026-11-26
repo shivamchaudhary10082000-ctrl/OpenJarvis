@@ -1,0 +1,76 @@
+name: NEO encrypted D1 backup artifact rehearsal
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  isolated-backup-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install age and SQLite
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y age sqlite3
+      - name: Create synthetic database fixture (no Cloudflare credentials)
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/neo-backup-fixture
+          sqlite3 /tmp/neo-backup-fixture/source.db <<'SQL'
+          PRAGMA foreign_keys=ON;
+          CREATE TABLE rehearsal_records(id INTEGER PRIMARY KEY, label TEXT NOT NULL, created_at TEXT NOT NULL);
+          INSERT INTO rehearsal_records(label,created_at) VALUES
+            ('fixture-alpha','2026-01-01T00:00:00Z'),
+            ('fixture-beta','2026-01-02T00:00:00Z');
+          SQL
+          sqlite3 /tmp/neo-backup-fixture/source.db '.dump' > /tmp/neo-backup-fixture/fixture.sql
+          test -s /tmp/neo-backup-fixture/fixture.sql
+      - name: Generate ephemeral test key and encrypt before upload
+        run: |
+          set -euo pipefail
+          age-keygen -o /tmp/neo-backup-fixture/test-key.txt 2>/tmp/neo-age-keygen.log
+          recipient="$(grep '^# public key:' /tmp/neo-age-keygen.log | awk '{print $4}')"
+          test -n "$recipient"
+          age -r "$recipient" -o /tmp/neo-backup-fixture/fixture.sql.age /tmp/neo-backup-fixture/fixture.sql
+          sha256sum /tmp/neo-backup-fixture/fixture.sql.age > /tmp/neo-backup-fixture/ciphertext.sha256
+          test -s /tmp/neo-backup-fixture/fixture.sql.age
+          echo "Ciphertext created before artifact upload."
+      - name: Upload ciphertext and checksum only
+        uses: actions/upload-artifact@v4
+        with:
+          name: neo-d1-recovery-rehearsal-${{ github.run_id }}
+          path: |
+            /tmp/neo-backup-fixture/fixture.sql.age
+            /tmp/neo-backup-fixture/ciphertext.sha256
+          retention-days: 1
+          if-no-files-found: error
+      - name: Download artifact for recovery rehearsal
+        uses: actions/download-artifact@v4
+        with:
+          name: neo-d1-recovery-rehearsal-${{ github.run_id }}
+          path: /tmp/neo-recovery-download
+      - name: Verify checksum, decrypt, restore to isolated SQLite, and validate
+        run: |
+          set -euo pipefail
+          cd /tmp/neo-recovery-download
+          sha256sum -c ciphertext.sha256
+          age -d -i /tmp/neo-backup-fixture/test-key.txt -o /tmp/neo-recovery-download/restored.sql fixture.sql.age
+          test -s /tmp/neo-recovery-download/restored.sql
+          sqlite3 /tmp/neo-recovery-download/restored.db < /tmp/neo-recovery-download/restored.sql
+          test "$(sqlite3 /tmp/neo-recovery-download/restored.db 'SELECT COUNT(*) FROM rehearsal_records;')" = "2"
+          test "$(sqlite3 /tmp/neo-recovery-download/restored.db "SELECT label FROM rehearsal_records WHERE id=2;")" = "fixture-beta"
+          echo "Checksum verified, decrypted, isolated restore succeeded, and fixture data validated."
+      - name: Summary
+        run: |
+          {
+            echo "## Encrypted backup artifact rehearsal"
+            echo "- Synthetic fixture only; no remote D1 access or credentials."
+            echo "- Encryption before upload: passed"
+            echo "- Artifact retention: 1 day"
+            echo "- Ciphertext checksum after download: passed"
+            echo "- Decryption: passed"
+            echo "- Isolated SQLite restore and fixture validation: passed"
+            echo "- This is a pipeline rehearsal, not a backup of real staging D1."
+          } >> "$GITHUB_STEP_SUMMARY"

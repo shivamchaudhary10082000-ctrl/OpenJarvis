@@ -511,7 +511,7 @@ async function route(req: Request, env: Env): Promise<Response> {
         if (x.platform === "browser" && (claims.iss === "https://accounts.google.com" || claims.iss === "accounts.google.com")) {
           const session = await issueBrowserSession(env, claims.sub, deviceId, x.public_key_jwk as JsonWebKey);
           return json({ device_id: deviceId, account_id: claims.sub, status: "enrolled", session_type: "browser" }, 200, {
-            "set-cookie": browserSessionCookieHeader(session.token, session.expiresAt - now()),
+            "set-cookie": browserSessionCookieHeader(session.token, browserSessionAbsoluteSeconds),
           });
         }
         return json({ device_id: deviceId, account_id: claims.sub, status: "enrolled" }, 200);
@@ -523,7 +523,7 @@ async function route(req: Request, env: Env): Promise<Response> {
       if (x.platform === "browser" && (claims.iss === "https://accounts.google.com" || claims.iss === "accounts.google.com")) {
         const session = await issueBrowserSession(env, claims.sub, deviceId, x.public_key_jwk as JsonWebKey);
         return json({ device_id: deviceId, account_id: claims.sub, status: "enrolled", session_type: "browser" }, 201, {
-          "set-cookie": browserSessionCookieHeader(session.token, session.expiresAt - now()),
+          "set-cookie": browserSessionCookieHeader(session.token, browserSessionAbsoluteSeconds),
         });
       }
       return json({ device_id: deviceId, account_id: claims.sub, status: "enrolled" }, 201);

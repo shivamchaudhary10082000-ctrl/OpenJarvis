@@ -10,6 +10,8 @@ const audience = bindings.ACCESS_AUD || "";
 const baseUrl = "https://neo.integration.test";
 let accessKeys: CryptoKeyPair;
 let accessPublicJwk: JsonWebKey;
+let googleKeys: CryptoKeyPair;
+let googlePublicJwk: JsonWebKey;
 
 function base64Url(bytes: Uint8Array): string {
   let binary = "";
@@ -43,6 +45,34 @@ async function accessToken(
   return input + "." + base64Url(signature);
 }
 
+async function googleIdToken(subject: string, nonce: string, kid: string): Promise<string> {
+  const header = base64UrlJson({ alg: "RS256", kid });
+  const payload = base64UrlJson({
+    sub: subject, iss: "https://accounts.google.com", aud: "neo-browser-test-client",
+    exp: Math.floor(Date.now() / 1000) + 300, iat: Math.floor(Date.now() / 1000), nonce,
+  });
+  const input = header + "." + payload;
+  const signature = new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", googleKeys.privateKey, encoder.encode(input)));
+  return input + "." + base64Url(signature);
+}
+function mockGoogleCerts(kid: string): void {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const requested = String(input);
+    if (requested === "https://www.googleapis.com/oauth2/v3/certs") {
+      return new Response(JSON.stringify({ keys: [{ ...googlePublicJwk, kid, alg: "RS256" }] }), {
+        status: 200, headers: { "content-type": "application/json" },
+      });
+    }
+    if (requested === issuer + "/cdn-cgi/access/certs") {
+      return new Response(JSON.stringify({ keys: [accessPublicJwk] }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return new Response("unexpected upstream", { status: 502 });
+  });
+}
+async function sha256Text(value: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(value)));
+  return Array.from(digest, byte => byte.toString(16).padStart(2, "0")).join("");
+}
 function mockAccessCerts(upstream?: (url: string, init?: RequestInit) => Response | Promise<Response>): void {
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const requested = String(input);
@@ -165,6 +195,11 @@ beforeAll(async () => {
     ["sign", "verify"],
   );
   accessPublicJwk = { ...(await crypto.subtle.exportKey("jwk", accessKeys.publicKey)), kid: "neo-test-key" } as JsonWebKey;
+  googleKeys = await crypto.subtle.generateKey({
+    name: "RSASSA-PKCS1-v1_5", modulusLength: 2048,
+    publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256",
+  }, true, ["sign", "verify"]);
+  googlePublicJwk = await crypto.subtle.exportKey("jwk", googleKeys.publicKey);
 });
 
 beforeEach(() => mockAccessCerts());
@@ -206,6 +241,85 @@ describe("D1-backed Access and device proof", () => {
       headers: { authorization: "Bearer " + tampered, "x-neo-device-id": device.id },
     }), bindings);
     expect(signatureResponse.status).toBe(401);
+  });
+
+  it("issues a hashed HttpOnly browser session after Google nonce-bound device enrollment and revokes it on logout", async () => {
+    const kid = "neo-google-session-" + crypto.randomUUID();
+    mockGoogleCerts(kid);
+    const googleBindings = { ...bindings, GOOGLE_OAUTH_CLIENT_IDS: "neo-browser-test-client" } as Env;
+    const challengeResponse = await worker.fetch(new Request(baseUrl + "/v1/auth/challenge", {
+      headers: { "cf-connecting-ip": "198.51.100.42" },
+    }), googleBindings);
+    expect(challengeResponse.status).toBe(200);
+    const challenge = await challengeResponse.json() as { nonce: string };
+    const token = await googleIdToken("browser-session-subject", challenge.nonce, kid);
+    const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+    const publicJwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
+    const deviceId = crypto.randomUUID().replace(/-/g, "");
+    const enrolled = await worker.fetch(new Request(baseUrl + "/v1/devices", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer " + token,
+        "content-type": "application/json",
+        "x-neo-device-id": deviceId,
+      },
+      body: JSON.stringify({ label: "Browser session test", platform: "browser", public_key_jwk: publicJwk, capabilities: ["chat"] }),
+    }), googleBindings);
+    expect(enrolled.status).toBe(201);
+    const setCookie = enrolled.headers.get("set-cookie") || "";
+    expect(setCookie).toMatch(/^__Host-neo_session=[A-Za-z0-9_-]{43}; Path=\/; Max-Age=\d+; Secure; HttpOnly; SameSite=Strict$/);
+    const rawSession = setCookie.split(";")[0].split("=")[1];
+    const sessionHash = await sha256Text(rawSession);
+    const stored = await bindings.DB.prepare("SELECT session_hash,account_id,device_id,public_key_hash,expires_at,absolute_expires_at FROM browser_sessions WHERE session_hash=?")
+      .bind(sessionHash).first<{session_hash:string;account_id:string;device_id:string;public_key_hash:string;expires_at:number;absolute_expires_at:number}>();
+    expect(stored).toMatchObject({ session_hash: sessionHash, account_id: "google:browser-session-subject", device_id: deviceId });
+    expect(stored?.session_hash).not.toBe(rawSession);
+    expect(stored?.expires_at).toBeLessThanOrEqual(stored?.absolute_expires_at || 0);
+
+    const device: TestDevice = {
+      id: deviceId, account: "google:browser-session-subject",
+      token: await accessToken("different-bearer-subject"), privateKey: pair.privateKey,
+    };
+    const bootstrap = await worker.fetch(new Request(baseUrl + "/v1/session", {
+      headers: { cookie: "__Host-neo_session=" + rawSession },
+    }), googleBindings);
+    expect(bootstrap.status).toBe(200);
+    expect(await bootstrap.json()).toMatchObject({ account_id: device.account, device_id: deviceId, session_type: "browser" });
+
+    const crossOriginRequest = await signedRequest(device, "/v1/devices/heartbeat", { method: "POST" });
+    crossOriginRequest.headers.set("cookie", "__Host-neo_session=" + rawSession);
+    crossOriginRequest.headers.set("origin", "https://attacker.example");
+    crossOriginRequest.headers.set("sec-fetch-site", "cross-site");
+    const crossOrigin = await worker.fetch(crossOriginRequest, googleBindings);
+    expect(crossOrigin.status).toBe(403);
+
+    const logout = await worker.fetch(new Request(baseUrl + "/v1/auth/logout", {
+      method: "POST",
+      headers: { cookie: "__Host-neo_session=" + rawSession, origin: baseUrl, "sec-fetch-site": "same-origin" },
+    }), googleBindings);
+    expect(logout.status).toBe(204);
+    expect(logout.headers.get("set-cookie")).toContain("__Host-neo_session=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Strict");
+    const afterLogout = await worker.fetch(await signedRequest(device, "/v1/devices/heartbeat", {
+      method: "POST", headers: { cookie: "__Host-neo_session=" + rawSession },
+    }), googleBindings);
+    expect(afterLogout.status).toBe(401);
+  });
+
+  it("invalid or revoked browser cookies never fall back to a valid bearer token", async () => {
+    const device = await enrolDevice("session-no-downgrade-" + crypto.randomUUID(), "Session no downgrade");
+    const publicKey = await bindings.DB.prepare("SELECT public_key_jwk FROM devices WHERE device_id=?")
+      .bind(device.id).first<{public_key_jwk:string}>();
+    const token = base64Url(crypto.getRandomValues(new Uint8Array(32)));
+    const hash = await sha256Text(token);
+    const timestamp = Math.floor(Date.now() / 1000);
+    const jwk = JSON.parse(publicKey!.public_key_jwk) as JsonWebKey;
+    const keyHash = await sha256Text("P-256." + jwk.x + "." + jwk.y);
+    await bindings.DB.prepare("INSERT INTO browser_sessions(session_hash,account_id,device_id,public_key_hash,created_at,last_seen_at,expires_at,absolute_expires_at) VALUES(?,?,?,?,?,?,?,?)")
+      .bind(hash, device.account, device.id, keyHash, timestamp, timestamp, timestamp + 3600, timestamp + 86400).run();
+    await bindings.DB.prepare("UPDATE browser_sessions SET revoked_at=? WHERE session_hash=?").bind(timestamp, hash).run();
+    const request = await signedRequest(device, "/v1/devices/heartbeat", { method: "POST" });
+    request.headers.set("cookie", "__Host-neo_session=" + token);
+    expect((await worker.fetch(request, bindings)).status).toBe(401);
   });
 
   it("returns only the verified Access subject for browser account-scope bootstrap", async () => {

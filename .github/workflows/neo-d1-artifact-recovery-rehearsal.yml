@@ -35,8 +35,8 @@ jobs:
       - name: Generate ephemeral test key and encrypt before upload
         run: |
           set -euo pipefail
-          age-keygen -o /tmp/neo-backup-fixture/test-key.txt 2>/tmp/neo-age-keygen.log
-          recipient="$(grep '^# public key:' /tmp/neo-age-keygen.log | awk '{print $4}')"
+          age-keygen -o /tmp/neo-backup-fixture/test-key.txt
+          recipient="$(grep '^# public key:' /tmp/neo-backup-fixture/test-key.txt | awk '{print $4}')"
           test -n "$recipient"
           age -r "$recipient" -o /tmp/neo-backup-fixture/fixture.sql.age /tmp/neo-backup-fixture/fixture.sql
           sha256sum /tmp/neo-backup-fixture/fixture.sql.age > /tmp/neo-backup-fixture/ciphertext.sha256

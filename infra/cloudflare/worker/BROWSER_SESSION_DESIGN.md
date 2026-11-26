@@ -19,7 +19,7 @@ Status: implemented on `neo/foundation-architecture`; not yet live. Migration `0
 4. Browser loads or creates its local P-256 device identity scoped to that account.
 5. Browser posts `/v1/devices` with the ID token, device ID, public JWK, platform=`browser`, and capabilities. Worker verifies Google signature/issuer/audience/iat/exp/nonce and atomically consumes the one-use challenge. For an existing device, Worker requires exact account and public-key match and rejects revoked devices.
 6. Only after successful new or matching-existing browser enrollment, Worker creates a 256-bit random opaque session token, stores only its SHA-256 hash with account/device/public-key fingerprint, creation/expiry/last-seen timestamps, and returns a cookie:
-   `__Host-neo_session=<token>; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=604800`.
+   `__Host-neo_session=<token>; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=2592000`. The cookie is retained for the 30-day absolute lifetime; the server enforces the seven-day idle timeout and refreshes it on authenticated use.
    No Domain attribute. Cookie is host-only. Responses are `Cache-Control: no-store`.
 7. Browser discards the Google ID token from JS memory after session establishment. Subsequent API calls use same-origin credentials and existing P-256 request signatures; they do not send a Google bearer token.
 8. On reload, browser first calls `GET /v1/session` with credentials=same-origin. A valid session identifies the device; the client loads the matching non-exportable local private key and resumes. If the local key is absent/mismatched, fail closed and require a new device identity/enrollment.

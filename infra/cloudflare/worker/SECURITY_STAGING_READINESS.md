@@ -36,7 +36,7 @@ Important limitations:
 - Browser API assets and Worker API are served from the same origin. No wildcard CORS policy is configured. Cookie-based mutation CSRF/origin enforcement is not implemented because cookie sessions do not yet exist.
 - The current integration tests cover Google OIDC validation, challenge replay rejection, browser device enrollment through identity assertions, device proof replay, account isolation, heartbeat and revocation. They do not prove a real deployed Google login or a persistent browser session.
 
-A proper browser session exchange needs a reviewed design and a new migration (session hash, account/device binding, expiry and revocation), HttpOnly/Secure/SameSite cookie handling, same-origin mutation checks, logout/revocation and focused tests. Do not claim session hardening complete until those changes and tests pass.
+The detailed design and required test matrix are now recorded in [`BROWSER_SESSION_DESIGN.md`](./BROWSER_SESSION_DESIGN.md). It specifies an opaque hashed session, device/public-key binding, `__Host-` HttpOnly/Secure/SameSite cookie, origin/Fetch-Metadata checks, logout, expiry, revocation and native-client compatibility. This is design only: runtime code, migration `0011`, and automated tests are not implemented yet. Do not claim session hardening complete until those changes and tests pass.
 
 ## Live staging status
 

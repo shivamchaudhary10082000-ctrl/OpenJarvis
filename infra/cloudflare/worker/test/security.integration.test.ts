@@ -246,7 +246,7 @@ describe("D1-backed Access and device proof", () => {
   it("issues a hashed HttpOnly browser session after Google nonce-bound device enrollment and revokes it on logout", async () => {
     const kid = "neo-google-session-" + crypto.randomUUID();
     mockGoogleCerts(kid);
-    const googleBindings = Object.assign(Object.create(bindings), { GOOGLE_OAUTH_CLIENT_IDS: "neo-browser-test-client" }) as Env;
+    const googleBindings = { DB: bindings.DB, GOOGLE_OAUTH_CLIENT_IDS: "neo-browser-test-client" } as Env;
     const challengeResponse = await worker.fetch(new Request(baseUrl + "/v1/auth/challenge", {
       headers: { "cf-connecting-ip": "198.51.100.42" },
     }), googleBindings);

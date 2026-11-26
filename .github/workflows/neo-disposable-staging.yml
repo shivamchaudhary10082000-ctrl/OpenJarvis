@@ -38,8 +38,8 @@ jobs:
       NEO_GOOGLE_WEB_CLIENT_ID: ${{ vars.NEO_GOOGLE_WEB_CLIENT_ID }}
       CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ vars.CLOUDFLARE_WORKERS_SUBDOMAIN }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
 
@@ -115,8 +115,8 @@ jobs:
       NEO_GOOGLE_WEB_CLIENT_ID: ${{ vars.NEO_GOOGLE_WEB_CLIENT_ID }}
       EXPECTED_D1_ID: dd4c03d6-a286-4ac9-abbc-8f162b692acc
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
 

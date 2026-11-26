@@ -300,7 +300,7 @@ describe("D1-backed Access and device proof", () => {
     expect(logout.status).toBe(204);
     expect(logout.headers.get("set-cookie")).toContain("__Host-neo_session=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Strict");
     const afterLogout = await worker.fetch(await signedRequest(device, "/v1/devices/heartbeat", {
-      method: "POST", headers: { cookie: "__Host-neo_session=" + rawSession },
+      method: "POST", headers: { cookie: "__Host-neo_session=" + rawSession, origin: baseUrl, "sec-fetch-site": "same-origin" },
     }), googleBindings);
     expect(afterLogout.status).toBe(401);
   });
@@ -317,7 +317,7 @@ describe("D1-backed Access and device proof", () => {
     await bindings.DB.prepare("INSERT INTO browser_sessions(session_hash,account_id,device_id,public_key_hash,created_at,last_seen_at,expires_at,absolute_expires_at) VALUES(?,?,?,?,?,?,?,?)")
       .bind(hash, device.account, device.id, keyHash, timestamp, timestamp, timestamp + 3600, timestamp + 86400).run();
     const revoke = await signedRequest(device, "/v1/devices/" + device.id, {
-      method: "DELETE", headers: { cookie: "__Host-neo_session=" + token },
+      method: "DELETE", headers: { cookie: "__Host-neo_session=" + token, origin: baseUrl, "sec-fetch-site": "same-origin" },
     });
     const response = await worker.fetch(revoke, bindings);
     expect(response.status).toBe(204);
@@ -325,7 +325,7 @@ describe("D1-backed Access and device proof", () => {
       .bind(hash).first<{revoked_at:number|null}>();
     expect(stored?.revoked_at).not.toBeNull();
     const afterRevoke = await signedRequest(device, "/v1/devices/heartbeat", {
-      method: "POST", headers: { cookie: "__Host-neo_session=" + token },
+      method: "POST", headers: { cookie: "__Host-neo_session=" + token, origin: baseUrl, "sec-fetch-site": "same-origin" },
     });
     expect((await worker.fetch(afterRevoke, bindings)).status).toBe(403);
   });

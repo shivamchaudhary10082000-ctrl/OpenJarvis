@@ -327,7 +327,7 @@ describe("D1-backed Access and device proof", () => {
     const afterRevoke = await signedRequest(device, "/v1/devices/heartbeat", {
       method: "POST", headers: { cookie: "__Host-neo_session=" + token },
     });
-    expect((await worker.fetch(afterRevoke, bindings)).status).toBe(401);
+    expect((await worker.fetch(afterRevoke, bindings)).status).toBe(403);
   });
 
   it("invalid or revoked browser cookies never fall back to a valid bearer token", async () => {

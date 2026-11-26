@@ -277,18 +277,97 @@ async function consumeGoogleLoginChallenge(claims: Claims, env: Env): Promise<bo
   ).bind(timestamp, await sha256Hex(claims.nonce), timestamp).run();
   return result.meta.changes === 1;
 }
+const browserSessionCookie = "__Host-neo_session";
+const browserSessionIdleSeconds = 7 * 24 * 60 * 60;
+const browserSessionAbsoluteSeconds = 30 * 24 * 60 * 60;
+type BrowserSessionRow = {
+  session_hash: string; account_id: string; device_id: string; public_key_hash: string;
+  expires_at: number; absolute_expires_at: number; last_seen_at: number;
+};
+function readBrowserSessionToken(req: Request): string | null {
+  const cookie = req.headers.get("cookie");
+  if (cookie === null) return null;
+  for (const item of cookie.split(";")) {
+    const index = item.indexOf("=");
+    if (index >= 0 && item.slice(0, index).trim() === browserSessionCookie) return item.slice(index + 1).trim();
+  }
+  return null;
+}
+function browserSessionCookieHeader(token: string, maxAge: number): string {
+  return browserSessionCookie + "=" + token + "; Path=/; Max-Age=" + maxAge + "; Secure; HttpOnly; SameSite=Strict";
+}
+function clearBrowserSessionCookieHeader(): string {
+  return browserSessionCookie + "=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Strict";
+}
+function isSameOriginBrowserRequest(req: Request): boolean {
+  const origin = req.headers.get("origin");
+  const fetchSite = req.headers.get("sec-fetch-site");
+  return origin === new URL(req.url).origin && fetchSite !== "cross-site";
+}
+async function browserPublicKeyHash(jwk: JsonWebKey): Promise<string> {
+  if (jwk.kty !== "EC" || jwk.crv !== "P-256" || typeof jwk.x !== "string" || typeof jwk.y !== "string") {
+    throw new Error("Invalid browser device public key");
+  }
+  return sha256Hex("P-256." + jwk.x + "." + jwk.y);
+}
+async function issueBrowserSession(
+  env: Env, accountId: string, deviceId: string, publicKeyJwk: JsonWebKey,
+): Promise<{ token: string; expiresAt: number }> {
+  const timestamp = now();
+  const absoluteExpiresAt = timestamp + browserSessionAbsoluteSeconds;
+  const expiresAt = Math.min(timestamp + browserSessionIdleSeconds, absoluteExpiresAt);
+  const token = encodeBytesBase64Url(crypto.getRandomValues(new Uint8Array(32)));
+  await env.DB.prepare(
+    "INSERT INTO browser_sessions(session_hash,account_id,device_id,public_key_hash,created_at,last_seen_at,expires_at,absolute_expires_at) VALUES(?,?,?,?,?,?,?,?)",
+  ).bind(await sha256Hex(token), accountId, deviceId, await browserPublicKeyHash(publicKeyJwk), timestamp, timestamp, expiresAt, absoluteExpiresAt).run();
+  return { token, expiresAt };
+}
+async function resolveBrowserSession(req: Request, env: Env): Promise<BrowserSessionRow | null> {
+  const token = readBrowserSessionToken(req);
+  if (token === null) return null;
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new Error("Invalid browser session");
+  if (!["GET", "HEAD", "OPTIONS"].includes(req.method.toUpperCase()) && !isSameOriginBrowserRequest(req)) {
+    throw new Error("Cross-origin browser session mutation rejected");
+  }
+  const hash = await sha256Hex(token);
+  const session = await env.DB.prepare(
+    "SELECT session_hash,account_id,device_id,public_key_hash,expires_at,absolute_expires_at,last_seen_at FROM browser_sessions WHERE session_hash=? AND revoked_at IS NULL AND expires_at>? AND absolute_expires_at>?",
+  ).bind(hash, now(), now()).first<BrowserSessionRow>();
+  if (!session) throw new Error("Browser session is expired or revoked");
+  const account = await env.DB.prepare("SELECT status FROM accounts WHERE account_id=?").bind(session.account_id).first<{status:string}>();
+  if (!account || account.status !== "active") throw new Error("Browser session account is inactive");
+  const device = await env.DB.prepare(
+    "SELECT public_key_jwk,revoked_at FROM devices WHERE device_id=? AND account_id=?",
+  ).bind(session.device_id, session.account_id).first<{public_key_jwk:string;revoked_at:number|null}>();
+  if (!device || device.revoked_at !== null) throw new Error("Browser session device is revoked");
+  const currentKeyHash = await browserPublicKeyHash(JSON.parse(device.public_key_jwk) as JsonWebKey);
+  if (currentKeyHash !== session.public_key_hash) throw new Error("Browser session device key changed");
+  const timestamp = now();
+  if (session.last_seen_at < timestamp - 60) {
+    const nextExpiry = Math.min(timestamp + browserSessionIdleSeconds, session.absolute_expires_at);
+    await env.DB.prepare("UPDATE browser_sessions SET last_seen_at=?,expires_at=? WHERE session_hash=? AND revoked_at IS NULL")
+      .bind(timestamp, nextExpiry, hash).run();
+    session.last_seen_at = timestamp;
+    session.expires_at = nextExpiry;
+  }
+  return session;
+}
 async function authenticate(req: Request, env: Env): Promise<{ account: string; device: Device }> {
-  // Browser assertions and native/controlled bearer tokens share the exact
-  // same RS256, issuer, audience and expiry validation.
-  const claims = await identityClaimsFromRequest(req, env);
-  const account = claims.sub;
-  await env.DB.prepare("INSERT OR IGNORE INTO accounts(account_id, created_at, status) VALUES(?, ?, 'active')").bind(account, now()).run();
+  // A supplied browser cookie is authoritative. Never downgrade an invalid
+  // session to a bearer token; browser sessions still require P-256 proof.
+  const browserSession = await resolveBrowserSession(req, env);
+  const claims = browserSession ? null : await identityClaimsFromRequest(req, env);
+  const account = browserSession?.account_id || claims!.sub;
   const accountRow = await env.DB.prepare("SELECT status FROM accounts WHERE account_id = ?").bind(account).first<{status:string}>();
   if (!accountRow || accountRow.status !== "active") throw new Error("Account is not active");
   const deviceId = req.headers.get("x-neo-device-id") || "";
   if (!/^[A-Za-z0-9_-]{16,128}$/.test(deviceId)) throw new Error("Invalid or missing device id");
+  if (browserSession && deviceId !== browserSession.device_id) throw new Error("Browser session device mismatch");
   const row = await env.DB.prepare("SELECT device_id, account_id, public_key_jwk, revoked_at FROM devices WHERE device_id = ? AND account_id = ?").bind(deviceId, account).first<Device>();
   if (!row || row.revoked_at !== null) throw new Error("Device is not enrolled or has been revoked");
+  if (browserSession && await browserPublicKeyHash(JSON.parse(row.public_key_jwk) as JsonWebKey) !== browserSession.public_key_hash) {
+    throw new Error("Browser session device key changed");
+  }
   {
     const ts = Number(req.headers.get("x-neo-timestamp"));
     const nonce = req.headers.get("x-neo-nonce") || "";
@@ -358,11 +437,25 @@ async function route(req: Request, env: Env): Promise<Response> {
   // consume the OIDC nonce; first-device enrollment consumes it exactly once.
   if (req.method === "GET" && path === "/session") {
     try {
+      const browserSession = await resolveBrowserSession(req, env);
+      if (browserSession) return json({
+        account_id: browserSession.account_id, device_id: browserSession.device_id,
+        expires_at: browserSession.expires_at, session_type: "browser",
+      });
       const claims = await identityClaimsFromRequest(req, env);
-      return json({ account_id: claims.sub });
+      return json({ account_id: claims.sub, session_type: "identity_bootstrap" });
     } catch {
-      return fail(401, "unauthorized", "A valid NEO identity session is required");
+      return fail(401, "unauthorized", "A valid NEO browser or identity session is required", { "set-cookie": clearBrowserSessionCookieHeader() });
     }
+  }
+  if (req.method === "POST" && path === "/auth/logout") {
+    if (!isSameOriginBrowserRequest(req)) return fail(403, "origin_rejected", "Browser logout must be same-origin");
+    const token = readBrowserSessionToken(req);
+    if (token && /^[A-Za-z0-9_-]{43}$/.test(token)) {
+      await env.DB.prepare("UPDATE browser_sessions SET revoked_at=? WHERE session_hash=? AND revoked_at IS NULL")
+        .bind(now(), await sha256Hex(token)).run();
+    }
+    return new Response(null, { status: 204, headers: { "set-cookie": clearBrowserSessionCookieHeader(), "cache-control": "no-store" } });
   }
   if (!path.startsWith("/")) return fail(404, "not_found", "Route not found");
   // First enrolment uses a verified identity token and binds a client-generated P-256 key.
@@ -386,6 +479,9 @@ async function route(req: Request, env: Env): Promise<Response> {
         return fail(403, "account_inactive", "Account is not active");
       }
       await enforceAccountRateLimit(claims.sub, env);
+      if (!await consumeGoogleLoginChallenge(claims, env)) {
+        return fail(401, "oidc_challenge_invalid", "Google sign-in challenge is missing, expired or already used; sign in again");
+      }
       const existingDevice = await env.DB.prepare(
         "SELECT account_id, public_key_jwk, revoked_at FROM devices WHERE device_id = ?",
       ).bind(deviceId).first<{account_id:string;public_key_jwk:string;revoked_at:number|null}>();
@@ -400,15 +496,24 @@ async function route(req: Request, env: Env): Promise<Response> {
         if (existingDevice.revoked_at !== null) {
           return fail(409, "device_revoked", "This device identity was revoked; create a new local device identity to enrol again");
         }
+        if (x.platform === "browser" && (claims.iss === "https://accounts.google.com" || claims.iss === "accounts.google.com")) {
+          const session = await issueBrowserSession(env, claims.sub, deviceId, x.public_key_jwk as JsonWebKey);
+          return json({ device_id: deviceId, account_id: claims.sub, status: "enrolled" }, 200, {
+            "set-cookie": browserSessionCookieHeader(session.token, session.expiresAt - now()),
+          });
+        }
         return json({ device_id: deviceId, account_id: claims.sub, status: "enrolled" }, 200);
-      }
-      if (!await consumeGoogleLoginChallenge(claims, env)) {
-        return fail(401, "oidc_challenge_invalid", "Google sign-in challenge is missing, expired or already used; sign in again");
       }
       await env.DB.prepare("INSERT INTO devices(device_id, account_id, label, platform, public_key_jwk, capabilities_json, created_at) VALUES(?,?,?,?,?,?,?)")
         .bind(deviceId, claims.sub, x.label, x.platform, JSON.stringify(x.public_key_jwk), JSON.stringify(x.capabilities.slice(0,32)), now()).run();
       await env.DB.prepare("INSERT INTO audit_events(event_id,account_id,device_id,event_type,created_at) VALUES(?,?,?,?,?)")
         .bind(id(), claims.sub, deviceId, "device.enrolled", now()).run();
+      if (x.platform === "browser" && (claims.iss === "https://accounts.google.com" || claims.iss === "accounts.google.com")) {
+        const session = await issueBrowserSession(env, claims.sub, deviceId, x.public_key_jwk as JsonWebKey);
+        return json({ device_id: deviceId, account_id: claims.sub, status: "enrolled" }, 201, {
+          "set-cookie": browserSessionCookieHeader(session.token, session.expiresAt - now()),
+        });
+      }
       return json({ device_id: deviceId, account_id: claims.sub, status: "enrolled" }, 201);
     } catch (e) {
       if (e instanceof RateLimitExceeded) return fail(429, "rate_limited", "Account request rate limit exceeded; retry after the current minute");
@@ -450,9 +555,12 @@ async function route(req: Request, env: Env): Promise<Response> {
     }
     const revoke = path.match(/^\/devices\/([A-Za-z0-9_-]{16,128})$/);
     if (revoke && req.method === "DELETE") {
-      const result = await env.DB.prepare("UPDATE devices SET revoked_at = ? WHERE device_id = ? AND account_id = ? AND revoked_at IS NULL").bind(now(),revoke[1],account).run();
+      const revokedAt = now();
+      const result = await env.DB.prepare("UPDATE devices SET revoked_at = ? WHERE device_id = ? AND account_id = ? AND revoked_at IS NULL").bind(revokedAt,revoke[1],account).run();
       if (!result.meta.changes) return fail(404,"not_found","Device not found");
-      await env.DB.prepare("INSERT INTO audit_events(event_id,account_id,device_id,event_type,created_at) VALUES(?,?,?,?,?)").bind(id(),account,revoke[1],"device.revoked",now()).run();
+      await env.DB.prepare("UPDATE browser_sessions SET revoked_at=? WHERE device_id=? AND account_id=? AND revoked_at IS NULL")
+        .bind(revokedAt,revoke[1],account).run();
+      await env.DB.prepare("INSERT INTO audit_events(event_id,account_id,device_id,event_type,created_at) VALUES(?,?,?,?,?)").bind(id(),account,revoke[1],"device.revoked",revokedAt).run();
       return new Response(null,{status:204});
     }
     if (path === "/memory" && req.method === "GET") {
@@ -751,6 +859,13 @@ export async function cleanupExpiredDeviceNonces(env: Env): Promise<number> {
   const result = await env.DB.prepare("DELETE FROM device_nonces WHERE expires_at < ?").bind(now()).run();
   return Number(result.meta.changes || 0);
 }
+export async function cleanupExpiredBrowserSessions(env: Env): Promise<number> {
+  const timestamp = now();
+  const result = await env.DB.prepare(
+    "DELETE FROM browser_sessions WHERE (expires_at < ? OR absolute_expires_at < ?) AND created_at < ?",
+  ).bind(timestamp - 30 * 24 * 60 * 60, timestamp - 30 * 24 * 60 * 60, timestamp - 30 * 24 * 60 * 60).run();
+  return Number(result.meta.changes || 0);
+}
 
 /**
  * Reconcile reservations left open by a Worker termination or lost upstream
@@ -774,6 +889,7 @@ export default {
   fetch: (req:Request,env:Env) => route(req,env),
   scheduled: async (_controller: ScheduledController, env: Env) => {
     await cleanupExpiredDeviceNonces(env);
+    await cleanupExpiredBrowserSessions(env);
     await reconcileStaleProviderSpendReservations(env);
   },
 };

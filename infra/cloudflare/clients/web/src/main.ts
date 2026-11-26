@@ -19,6 +19,7 @@ const input = $("message-input") as HTMLTextAreaElement;
 const sendButton = $("send-button") as HTMLButtonElement;
 const messagesNode = $("messages");
 const clearButton = $("clear-button") as HTMLButtonElement;
+const logoutButton = $("logout-button") as HTMLButtonElement;
 let client: NeoDeviceClient | null = null;
 let history: ChatMessage[] = [];
 let busy = false;
@@ -177,6 +178,20 @@ clearButton.addEventListener("click", () => {
   empty.className = "empty-state";
   empty.textContent = "Your conversation starts here. Ask NEO anything.";
   messagesNode.append(empty);
+});
+logoutButton.addEventListener("click", async () => {
+  try {
+    await client?.logout();
+    client = null;
+    googleIdToken = null;
+    welcome.hidden = false;
+    chatPanel.hidden = true;
+    connectionState.textContent = "Signed out";
+    connectionState.className = "state state-idle";
+    await initialiseGoogleSignIn();
+  } catch (error) {
+    showError(error instanceof Error ? error.message : "Sign out failed.");
+  }
 });
 
 void (async () => {

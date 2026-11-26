@@ -483,14 +483,14 @@ async function route(req: Request, env: Env): Promise<Response> {
         return fail(401, "oidc_challenge_invalid", "Google sign-in challenge is missing, expired or already used; sign in again");
       }
       const existingDevice = await env.DB.prepare(
-        "SELECT account_id, public_key_jwk, revoked_at FROM devices WHERE device_id = ?",
-      ).bind(deviceId).first<{account_id:string;public_key_jwk:string;revoked_at:number|null}>();
+        "SELECT account_id, public_key_jwk, platform, revoked_at FROM devices WHERE device_id = ?",
+      ).bind(deviceId).first<{account_id:string;public_key_jwk:string;platform:string;revoked_at:number|null}>();
       if (existingDevice) {
         let existingKey: JsonWebKey | null = null;
         try { existingKey = JSON.parse(existingDevice.public_key_jwk) as JsonWebKey; } catch {}
         const sameKey = existingKey?.kty === "EC" && existingKey.crv === "P-256" &&
           existingKey.x === x.public_key_jwk.x && existingKey.y === x.public_key_jwk.y;
-        if (existingDevice.account_id !== claims.sub || !sameKey) {
+        if (existingDevice.account_id !== claims.sub || !sameKey || (x.platform === "browser" && existingDevice.platform !== "browser")) {
           return fail(409, "device_id_conflict", "Device ID is already bound to a different account or key");
         }
         if (existingDevice.revoked_at !== null) {
@@ -524,7 +524,7 @@ async function route(req: Request, env: Env): Promise<Response> {
   try { auth = await authenticate(req, env); } catch (e) {
     if (e instanceof RateLimitExceeded) return fail(429, "rate_limited", "Account request rate limit exceeded; retry after the current minute");
     const message = e instanceof Error ? e.message : "Authentication failed";
-    return fail(message.includes("revoked") || message.includes("not enrolled") ? 403 : 401, "unauthorized", message);
+    return fail(message.includes("revoked") || message.includes("not enrolled") || message.includes("cross-origin") || message.includes("device mismatch") || message.includes("key changed") ? 403 : 401, "unauthorized", message);
   }
   const { account, device } = auth;
   try {
@@ -861,9 +861,10 @@ export async function cleanupExpiredDeviceNonces(env: Env): Promise<number> {
 }
 export async function cleanupExpiredBrowserSessions(env: Env): Promise<number> {
   const timestamp = now();
+  const retentionCutoff = timestamp - 30 * 24 * 60 * 60;
   const result = await env.DB.prepare(
-    "DELETE FROM browser_sessions WHERE (expires_at < ? OR absolute_expires_at < ?) AND created_at < ?",
-  ).bind(timestamp - 30 * 24 * 60 * 60, timestamp - 30 * 24 * 60 * 60, timestamp - 30 * 24 * 60 * 60).run();
+    "DELETE FROM browser_sessions WHERE (revoked_at IS NOT NULL AND revoked_at < ?) OR ((expires_at < ? OR absolute_expires_at < ?) AND created_at < ?)",
+  ).bind(retentionCutoff, retentionCutoff, retentionCutoff, retentionCutoff).run();
   return Number(result.meta.changes || 0);
 }
 

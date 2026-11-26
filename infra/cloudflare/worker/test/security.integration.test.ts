@@ -305,6 +305,31 @@ describe("D1-backed Access and device proof", () => {
     expect(afterLogout.status).toBe(401);
   });
 
+  it("device revocation invalidates every browser session bound to that device", async () => {
+    const device = await enrolDevice("session-device-revoke-" + crypto.randomUUID(), "Session device revoke");
+    const publicKey = await bindings.DB.prepare("SELECT public_key_jwk FROM devices WHERE device_id=?")
+      .bind(device.id).first<{public_key_jwk:string}>();
+    const token = base64Url(crypto.getRandomValues(new Uint8Array(32)));
+    const hash = await sha256Text(token);
+    const timestamp = Math.floor(Date.now() / 1000);
+    const jwk = JSON.parse(publicKey!.public_key_jwk) as JsonWebKey;
+    const keyHash = await sha256Text("P-256." + jwk.x + "." + jwk.y);
+    await bindings.DB.prepare("INSERT INTO browser_sessions(session_hash,account_id,device_id,public_key_hash,created_at,last_seen_at,expires_at,absolute_expires_at) VALUES(?,?,?,?,?,?,?,?)")
+      .bind(hash, device.account, device.id, keyHash, timestamp, timestamp, timestamp + 3600, timestamp + 86400).run();
+    const revoke = await signedRequest(device, "/v1/devices/" + device.id, {
+      method: "DELETE", headers: { cookie: "__Host-neo_session=" + token },
+    });
+    const response = await worker.fetch(revoke, bindings);
+    expect(response.status).toBe(204);
+    const stored = await bindings.DB.prepare("SELECT revoked_at FROM browser_sessions WHERE session_hash=?")
+      .bind(hash).first<{revoked_at:number|null}>();
+    expect(stored?.revoked_at).not.toBeNull();
+    const afterRevoke = await signedRequest(device, "/v1/devices/heartbeat", {
+      method: "POST", headers: { cookie: "__Host-neo_session=" + token },
+    });
+    expect((await worker.fetch(afterRevoke, bindings)).status).toBe(401);
+  });
+
   it("invalid or revoked browser cookies never fall back to a valid bearer token", async () => {
     const device = await enrolDevice("session-no-downgrade-" + crypto.randomUUID(), "Session no downgrade");
     const publicKey = await bindings.DB.prepare("SELECT public_key_jwk FROM devices WHERE device_id=?")

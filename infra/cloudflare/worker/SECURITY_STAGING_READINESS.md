@@ -4,9 +4,9 @@ Reviewed against the current engineering branch. This document distinguishes sou
 
 ## Current code and CI evidence
 
-- Worker CI run #248 on commit `6694cb561a5e3390b7727f142d4ecac0d67129c2` passed TypeScript checking, Wrangler dry-run, OpenAPI lint, Worker tests and browser persistence tests. This is baseline evidence, not verification of the new browser-session implementation.
+- Current branch head `e63c6c97b01c420915d6dc0cff236bbeef3db467` passed Worker CI run [#45909902664](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45909902664): OpenAPI lint, TypeScript, Wrangler dry-run, Worker tests, and 9/9 Playwright browser persistence tests across Chromium, Firefox and WebKit.
 - The staging workflow uses `actions/checkout@v7` and `actions/setup-node@v6`, removing the prior Node.js 20 deprecation warning.
-- Latest changes add browser session issuance/enforcement, migration 0011, browser restore/sign-out, and regression tests. The first Worker CI attempt found a TypeScript error in the extended API error helper; this was fixed. A subsequent complete Worker CI run on the final branch head is still required.
+- Android unit and emulator instrumentation jobs passed in run [#45909902711](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45909902711). The overall branch check set had 22 successful checks, 7 intentionally skipped release/deploy checks, and one Windows ARM64 test still in progress when inspected.
 - Google ID-token validation checks RS256 signature, issuer, audience, issued-at and expiry. Google browser sign-in uses a short-lived, one-use server nonce.
 - Device requests continue to require enrolled P-256 keys, signed request canonicalization, timestamp bounds and one-use nonces.
 - Rate limiting, bounded bodies, memory revisions, task leases and provider spend reservation/settlement controls remain in place.
@@ -14,7 +14,7 @@ Reviewed against the current engineering branch. This document distinguishes sou
 
 ## Browser session implementation on the engineering branch
 
-Implemented in source (not yet deployed):
+Implemented in source and included in the current disposable staging deployment; live authenticated use remains blocked pending remote migration 0011:
 
 - `POST /v1/devices` creates a browser session only after Google ID-token validation and one-use OIDC challenge consumption; an existing browser device must match the same account and P-256 public key.
 - The opaque 256-bit cookie token is returned as `__Host-neo_session` with Path=/, Secure, HttpOnly and SameSite=Strict. Only its SHA-256 hash is stored in D1.
@@ -55,22 +55,21 @@ Important limitations:
 
 ## Live staging status
 
-- An earlier disposable deployment run #2 deployed commit `0676cb8a3a414e7b6fcfec04607d11728301653e`; its health probe returned `status=ok` for `disposable-staging`.
-- That deployment predates the current OIDC/session changes. The current engineering head is **not deployed**.
-- Latest deployment workflow jobs are skipped unless the explicit disposable-staging deployment gate is supplied. No deployment has been triggered by this work.
+- Deployment workflow run [#45909896048](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45909896048) deployed branch head `e63c6c97b01c420915d6dc0cff236bbeef3db467` to `neo-api-disposable-staging`. Wrangler reported Worker version `5ffdb1a6-390a-483a-a2c2-052d11e9ecf7`; the workflow health probe returned `{"status":"ok","environment":"disposable-staging"}`.
+- The deployment job succeeded and the D1 migration job was explicitly skipped. This deployment proves Worker availability, not successful browser authentication or database-backed operations.
 - Current live D1 schema state has not been independently verified.
 - Real Google sign-in, first-device enrollment, cookie issuance, authenticated browser operations, Android-to-browser sync and recovery have not been verified against the current Worker.
 
 ## Remaining release gates
 
-1. Complete the full Worker CI on the current branch head and fix any failures; then complete Web and Android harness CI.
+1. Finish the remaining Windows ARM64 CI check and inspect any failure; Worker, Web Alpha, Android harness and memory-safety checks on the current head have passed.
 2. Review the integrated diff and session tests independently.
 3. Owner creates the private R2 bucket and bucket-scoped token; configure secrets without sharing them in chat.
 4. Implement and verify encrypted backup upload + download/decrypt/restore rehearsal against a separate disposable database.
 5. Run a fresh read-only D1 preflight with the signed-URL log suppression in place; verify target UUID, remote migration list, Time Travel bookmark and durable private backup.
 6. Present exact migration 0011 SQL, affected objects, target UUID, backup ID/hash, recovery procedure and command. Obtain explicit owner approval before any remote D1 write.
 7. Apply only approved migration 0011 to the hard-coded disposable D1 UUID and verify migration history, table, columns, indexes and foreign keys.
-8. Deploy current Worker/browser assets to `neo-api-disposable-staging` only, then verify health and real Google login, session issue/resume/logout and device operations.
+8. Current Worker/browser assets are already deployed to `neo-api-disposable-staging` and health is green. After migration 0011 is safely applied, verify real Google login, session issue/resume/logout and device operations.
 9. Test challenge replay, device proof replay, revocation, memory sync, task lease conflicts and zero-budget provider blocking.
 10. Reset approval to `NO`; revoke/remove the temporary broad migration credential after its use/expiry.
 

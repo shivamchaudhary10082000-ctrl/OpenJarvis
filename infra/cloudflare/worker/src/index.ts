@@ -487,6 +487,9 @@ async function route(req: Request, env: Env): Promise<Response> {
       ).bind(deviceId).first<{account_id:string;public_key_jwk:string;platform:string;revoked_at:number|null}>();
       const browserGoogleLogin = x.platform === "browser" &&
         (claims.iss === "https://accounts.google.com" || claims.iss === "accounts.google.com");
+      if (browserGoogleLogin && !isSameOriginBrowserRequest(req)) {
+        return fail(403, "origin_rejected", "Google browser enrollment must be same-origin");
+      }
       if (browserGoogleLogin || !existingDevice) {
         if (!await consumeGoogleLoginChallenge(claims, env)) {
           return fail(401, "oidc_challenge_invalid", "Google sign-in challenge is missing, expired or already used; sign in again");

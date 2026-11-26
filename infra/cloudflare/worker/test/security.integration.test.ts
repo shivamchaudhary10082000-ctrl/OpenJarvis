@@ -246,7 +246,7 @@ describe("D1-backed Access and device proof", () => {
   it("issues a hashed HttpOnly browser session after Google nonce-bound device enrollment and revokes it on logout", async () => {
     const kid = "neo-google-session-" + crypto.randomUUID();
     mockGoogleCerts(kid);
-    const googleBindings = { ...bindings, GOOGLE_OAUTH_CLIENT_IDS: "neo-browser-test-client" } as Env;
+    const googleBindings = Object.assign(Object.create(bindings), { GOOGLE_OAUTH_CLIENT_IDS: "neo-browser-test-client" }) as Env;
     const challengeResponse = await worker.fetch(new Request(baseUrl + "/v1/auth/challenge", {
       headers: { "cf-connecting-ip": "198.51.100.42" },
     }), googleBindings);
@@ -342,8 +342,9 @@ describe("D1-backed Access and device proof", () => {
     await bindings.DB.prepare("INSERT INTO browser_sessions(session_hash,account_id,device_id,public_key_hash,created_at,last_seen_at,expires_at,absolute_expires_at) VALUES(?,?,?,?,?,?,?,?)")
       .bind(hash, device.account, device.id, keyHash, timestamp, timestamp, timestamp + 3600, timestamp + 86400).run();
     await bindings.DB.prepare("UPDATE browser_sessions SET revoked_at=? WHERE session_hash=?").bind(timestamp, hash).run();
-    const request = await signedRequest(device, "/v1/devices/heartbeat", { method: "POST" });
-    request.headers.set("cookie", "__Host-neo_session=" + token);
+    const request = await signedRequest(device, "/v1/devices/heartbeat", {
+      method: "POST", headers: { cookie: "__Host-neo_session=" + token, origin: baseUrl, "sec-fetch-site": "same-origin" },
+    });
     expect((await worker.fetch(request, bindings)).status).toBe(401);
   });
 

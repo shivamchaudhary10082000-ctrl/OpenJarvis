@@ -39,7 +39,7 @@ jobs:
           recipient="$(grep '^# public key:' /tmp/neo-backup-fixture/test-key.txt | awk '{print $4}')"
           test -n "$recipient"
           age -r "$recipient" -o /tmp/neo-backup-fixture/fixture.sql.age /tmp/neo-backup-fixture/fixture.sql
-          sha256sum /tmp/neo-backup-fixture/fixture.sql.age > /tmp/neo-backup-fixture/ciphertext.sha256
+          cd /tmp/neo-backup-fixture\n          sha256sum fixture.sql.age > ciphertext.sha256
           test -s /tmp/neo-backup-fixture/fixture.sql.age
           echo "Ciphertext created before artifact upload."
       - name: Upload ciphertext and checksum only

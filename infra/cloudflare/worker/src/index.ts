@@ -29,7 +29,7 @@ type Claims = { sub: string; iss: string; aud: string | string[]; exp: number; n
 type Device = { device_id: string; account_id: string; public_key_jwk: string; revoked_at: number | null };
 const json = (data: unknown, status = 200, headers: HeadersInit = {}) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...headers } });
-const fail = (status: number, code: string, message: string) => json({ error: { code, message } }, status);
+const fail = (status: number, code: string, message: string, headers: HeadersInit = {}) => json({ error: { code, message } }, status, headers);
 const b64u = (s: string) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - s.length % 4) % 4)), c => c.charCodeAt(0));
 export function encodeBytesBase64Url(bytes: Uint8Array): string {
   let binary = "";

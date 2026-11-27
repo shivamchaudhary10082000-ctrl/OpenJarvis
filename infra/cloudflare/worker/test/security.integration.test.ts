@@ -673,7 +673,7 @@ describe("Offline memory recall selection", () => {
       { memory_id: "c", revision: 1, trust_state: "approved", updated_at: 1 },
       { memory_id: "c", revision: 3, trust_state: "approved", updated_at: 3 },
       { memory_id: "d", revision: 1, trust_state: "approved", updated_at: 1 },
-      { memory_id: "d", revision: 2, trust_state: "quarantined", updated_at: 2 },
+      { memory_id: "d", revision: 2, trust_state: "rejected", updated_at: 2 },
     ];
     expect(selectRecallableMemory(records).map(record => [record.memory_id, record.revision])).toEqual([
       ["a", 1], ["d", 1], ["c", 3],
@@ -999,7 +999,7 @@ describe("D1-backed encrypted memory and task concurrency", () => {
 
     const ownerRecords = await call(owner, "/v1/memory?include_pending=true");
     expect(ownerRecords.status).toBe(200);
-    expect(await ownerRecords.text()).toContain("quarantined");
+    expect(await ownerRecords.text()).toContain("rejected");
     const otherRecords = await call(other, "/v1/memory?include_pending=true");
     expect(otherRecords.status).toBe(200);
     expect(await otherRecords.text()).not.toContain("rejected-memory");

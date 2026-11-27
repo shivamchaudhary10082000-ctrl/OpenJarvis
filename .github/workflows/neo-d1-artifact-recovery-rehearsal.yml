@@ -8,6 +8,8 @@ on:
       - .github/workflows/neo-d1-artifact-recovery-rehearsal.yml
       - infra/cloudflare/worker/scripts/restore-d1-backup-to-recovery.sh
       - .github/workflows/neo-encrypted-d1-backup.yml
+      - .github/workflows/neo-disposable-staging.yml
+      - infra/cloudflare/D1_RESTORE_ATTESTATION.txt
       - infra/cloudflare/D1_STAGING_RUNBOOK.md
       - infra/cloudflare/worker/D1_BACKUP_RECOVERY_RUNBOOK.md
 permissions:
@@ -42,7 +44,21 @@ jobs:
             echo "::error::Backup workflow must not hold the owner private key, depend on R2, or apply migrations."
             exit 1
           fi
-          echo "Restore script syntax, fixed D1 identities and backup-only workflow safety checks passed."
+          migration=.github/workflows/neo-disposable-staging.yml
+          attestation=infra/cloudflare/D1_RESTORE_ATTESTATION.txt
+          grep -Fq 'RESTORE_VERIFIED=NO' "$attestation"
+          grep -Fq 'RECOVERY_D1_UUID=a426343d-7c85-4441-a46a-7b7cead38ceb' "$attestation"
+          grep -Fq 'actions: read' "$migration"
+          grep -Fq 'RESTORE_VERIFIED=YES' "$migration"
+          grep -Fq 'actions/download-artifact@v7' "$migration"
+          grep -Fq 'sha256sum -c SHA256SUMS' "$migration"
+          if grep -Eq 'NEO_R2_|R2_BUCKET|r2[.]cloudflarestorage' "$migration"; then
+            echo "::error::Migration gate must not depend on an R2 bucket or credentials."
+            exit 1
+          fi
+          approval=infra/cloudflare/D1_MIGRATION_APPROVAL.txt
+          grep -Fqx 'NO' "$approval"
+          echo "Restore script syntax, backup-only workflow, and fail-closed migration attestation checks passed."
       - name: Install age and SQLite
         run: |
           set -euo pipefail

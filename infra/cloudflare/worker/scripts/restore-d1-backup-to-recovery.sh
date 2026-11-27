@@ -39,13 +39,31 @@ sqlite3 "$TMP_DIR/source.db" < "$TMP_DIR/neo-staging-db.sql"
 [[ "$(sqlite3 "$TMP_DIR/source.db" 'PRAGMA integrity_check;')" == "ok" ]] || fail "Local source integrity check failed."
 [[ -z "$(sqlite3 "$TMP_DIR/source.db" 'PRAGMA foreign_key_check;')" ]] || fail "Local source has foreign-key violations."
 
-# D1's import path does not accept SQLite transaction wrappers. Keep the original
-# export intact for local comparison and create a D1-compatible import copy.
-sed -E '/^[[:space:]]*(BEGIN TRANSACTION|COMMIT);?[[:space:]]*$/Id' \
-  "$TMP_DIR/neo-staging-db.sql" > "$TMP_DIR/neo-staging-db-d1-import.sql"
+# D1's import path does not accept SQLite transaction wrappers or its reserved
+# _cf_KV system table. Re-dump the validated local copy, filtering only those
+# D1-incompatible wrappers/system-table statements before remote import.
+sqlite3 "$TMP_DIR/source.db" .dump | awk '
+  BEGIN { skip_cf_table = 0 }
+  {
+    line = tolower($0)
+    if (!skip_cf_table && line ~ /^create table( if not exists)?[[:space:]]+["\x60]?_cf_kv["\x60]?([[:space:]]|[(])/) {
+      skip_cf_table = 1
+      if ($0 ~ /\);[[:space:]]*$/) skip_cf_table = 0
+      next
+    }
+    if (skip_cf_table) {
+      if ($0 ~ /\);[[:space:]]*$/) skip_cf_table = 0
+      next
+    }
+    if (line ~ /^(insert into|replace into|delete from)[[:space:]]+["\x60]?_cf_kv["\x60]?([[:space:]]|[(])/) next
+    if (line ~ /^[[:space:]]*(begin transaction|commit);?[[:space:]]*$/) next
+    if (line ~ /^[[:space:]]*pragma foreign_keys[[:space:]]*=/) next
+    print
+  }
+' > "$TMP_DIR/neo-staging-db-d1-import.sql"
 test -s "$TMP_DIR/neo-staging-db-d1-import.sql" || fail "D1-compatible import SQL is empty."
-if grep -Eiq 'CREATE TABLE[[:space:]]+_cf_KV' "$TMP_DIR/neo-staging-db-d1-import.sql"; then
-  fail "Export includes Cloudflare's reserved _cf_KV table; refusing to import a reserved system table."
+if grep -Eiq 'CREATE TABLE.*_cf_KV|INSERT INTO.*_cf_KV' "$TMP_DIR/neo-staging-db-d1-import.sql"; then
+  fail "D1-compatible import still contains the reserved _cf_KV system table."
 fi
 
 cp "$ROOT/infra/cloudflare/wrangler.disposable.example.toml" "$CONFIG"

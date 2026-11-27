@@ -30,6 +30,7 @@ BACKUP_COMMIT="$(sed -n 's/^Commit: //p' "$BACKUP_DIR/backup-manifest.txt")"
 
 WORKER_DIR="$ROOT/infra/cloudflare/worker"
 CONFIG="$ROOT/infra/cloudflare/wrangler.recovery.local.toml"
+[[ ! -e "$CONFIG" ]] || fail "Refusing to overwrite an existing recovery Wrangler config: $CONFIG"
 TMP_DIR="$(mktemp -d)"
 cleanup() {
   rm -f "$CONFIG" "$TMP_DIR/neo-staging-db.sql" "$TMP_DIR/source.db" "$TMP_DIR/import.sql"

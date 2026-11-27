@@ -34,6 +34,10 @@ jobs:
           grep -Fq 'TARGET_NAME="neo-staging-recovery-test"' "$script"
           grep -Fq 'SOURCE_ID="dd4c03d6-a286-4ac9-abbc-8f162b692acc"' "$script"
           grep -Fq 'AGE_IDENTITY_FILE' "$script"
+          grep -Fq 'BACKUP_ATTEMPT' "$script"
+          grep -Fq 'BACKUP_CREATED_UTC' "$script"
+          grep -Fq 'BACKUP_SHA256' "$script"
+          grep -Fq 'expected encrypted backup file' "$script"
           if grep -Eq 'secrets\.NEO_BACKUP_AGE_IDENTITY|R2_BUCKET|r2\.cloudflarestorage' "$script"; then
             echo "::error::Owner-local restore script must not require GitHub-held private keys or R2."
             exit 1

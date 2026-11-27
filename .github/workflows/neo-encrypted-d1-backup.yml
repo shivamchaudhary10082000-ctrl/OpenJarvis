@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm_backup:
-        description: "Confirm encrypted SQL export of neo-staging-db (no migrations or SQL writes)"
+        description: "Authorize encrypted SQL export of neo-staging-db. No SQL mutations or migrations; D1 may be temporarily locked during export."
         required: true
         type: boolean
         default: false
@@ -32,6 +32,8 @@ jobs:
       )
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Cloudflare D1 export requires D1 Write and may temporarily lock the database.
+    # Use a Developer Platform Editor token scoped to this single D1 resource.
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_BACKUP_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

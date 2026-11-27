@@ -22,16 +22,17 @@ Workflow run [#45910522233](https://github.com/shivamchaudhary10082000-ctrl/Open
 
 The export was temporary runner data, not a durable backup. A Time Travel bookmark is not a substitute for the required encrypted, independently recoverable backup.
 
-## Current workflow limitation — do not use APPLY to obtain a backup
+## Migration gate behavior
 
-The current `.github/workflows/neo-disposable-staging.yml` has two relevant behaviors:
+The current `.github/workflows/neo-disposable-staging.yml` keeps migration apply separate from backup and restore:
 
-- `PREFLIGHT_ONLY` verifies the target, exports SQL to the ephemeral runner, lists migrations, and skips R2 upload and schema writes.
-- `APPLY_0001_0011` enables the R2 encryption/upload/download-checksum step and then immediately applies migrations 0001–0011 when that step succeeds.
+- `PREFLIGHT_ONLY` verifies the source UUID, records a Time Travel bookmark, exports SQL only to ephemeral runner storage, and lists migration state. It does not change schema.
+- `APPLY_0001_0011` is rejected unless `D1_RESTORE_ATTESTATION.txt` explicitly records `RESTORE_VERIFIED=YES` with the exact source and recovery UUIDs.
+- Before applying, the workflow checks the attested backup run is a successful manual run of the exact backup workflow on `neo/foundation-architecture`, downloads the referenced encrypted artifact, and verifies its checksum, source UUID and run ID against the attestation.
+- The owner-held age private identity is never placed in GitHub. The local restore script must have completed schema and record comparison, integrity checks and foreign-key validation before the owner records the attestation.
+- Both `D1_MIGRATION_APPROVAL.txt` and `D1_RESTORE_ATTESTATION.txt` remain `NO` by default. No migration is authorized by a successful backup alone.
 
-There is **no backup-only mode and no pause for owner-held decryption plus isolated restore verification**. Therefore the existing apply path cannot satisfy the required backup → download/checksum → owner decrypt → separate restore rehearsal → migration sequence. Do not set `APPLY_0001_0011` merely to get a backup.
-
-The existing apply workflow also does not yet provide a complete post-migration proof of all 11 migration-history entries and every foreign-key definition. Its current checks cover a subset of core tables, provider/OIDC triggers, and browser-session indexes. A future apply run must strengthen and record the full schema verification before it can be considered complete.
+Do not set `APPLY_0001_0011` merely to obtain a backup. Use the separate encrypted backup-only workflow and owner-local restore process first.
 
 ## Credentials and artifact storage status
 

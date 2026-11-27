@@ -32,7 +32,7 @@ WORKER_DIR="$ROOT/infra/cloudflare/worker"
 CONFIG="$ROOT/infra/cloudflare/wrangler.recovery.local.toml"
 TMP_DIR="$(mktemp -d)"
 cleanup() {
-  rm -f "$CONFIG" "$TMP_DIR/neo-staging-db.sql" "$TMP_DIR/source.db"
+  rm -f "$CONFIG" "$TMP_DIR/neo-staging-db.sql" "$TMP_DIR/source.db" "$TMP_DIR/import.sql"
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
@@ -80,8 +80,10 @@ walk(j);
 if(vals.length!==1||vals[0]!==0)throw new Error("Recovery D1 is not provably empty; refusing restore");
 NODE
 
-echo "Preflight passed: source backup verified; remote target UUID matches and is empty."
-npx wrangler d1 execute "$TARGET_NAME" --remote --config "$CONFIG" --file="$TMP_DIR/neo-staging-db.sql"
+bash "$ROOT/infra/cloudflare/worker/scripts/prepare-d1-import.sh" "$TMP_DIR/source.db" "$TMP_DIR/import.sql"
+test -s "$TMP_DIR/import.sql" || fail "Sanitized import SQL is empty."
+echo "Preflight passed: source backup verified; remote target UUID matches and is empty; SQL sanitizer produced import."
+npx wrangler d1 execute "$TARGET_NAME" --remote --config "$CONFIG" --file="$TMP_DIR/import.sql"
 echo "SQL import completed. Comparing restored schema and every table's records against the decrypted source backup..."
 
 node --input-type=module - "$TMP_DIR/source.db" "$TARGET_NAME" "$CONFIG" <<'NODE'

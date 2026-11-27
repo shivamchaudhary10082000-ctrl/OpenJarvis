@@ -966,6 +966,45 @@ describe("D1-backed encrypted memory and task concurrency", () => {
     expect(await otherFinal.text()).not.toContain("lifecycle-memory");
   });
 
+  it("rejects a pending memory with compare-and-swap, quarantines it, and prevents later approval", async () => {
+    const owner = await enrolDevice("memory-rejection-owner-" + crypto.randomUUID(), "Memory rejection owner");
+    const other = await enrolDevice("memory-rejection-other-" + crypto.randomUUID(), "Other account");
+    const created = await call(owner, "/v1/memory", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(encryptedPayload({ memory_id: "rejected-memory" })),
+    });
+    expect(created.status).toBe(201);
+    const pending = await created.json() as { revision: number };
+
+    const missingPrecondition = await call(owner, "/v1/memory/rejected-memory/reject", { method: "POST" });
+    expect(missingPrecondition.status).toBe(428);
+
+    const rejected = await call(owner, "/v1/memory/rejected-memory/reject", {
+      method: "POST", headers: { "if-match": String(pending.revision) },
+    });
+    expect(rejected.status).toBe(200);
+    expect(await rejected.json()).toMatchObject({
+      memory_id: "rejected-memory", revision: pending.revision + 1, trust_state: "quarantined",
+    });
+
+    const staleReject = await call(owner, "/v1/memory/rejected-memory/reject", {
+      method: "POST", headers: { "if-match": String(pending.revision) },
+    });
+    expect(staleReject.status).toBe(409);
+    const laterApproval = await call(owner, "/v1/memory/rejected-memory/approve", {
+      method: "POST", headers: { "if-match": String(pending.revision) },
+    });
+    expect(laterApproval.status).toBe(409);
+
+    const ownerRecords = await call(owner, "/v1/memory?include_pending=true");
+    expect(ownerRecords.status).toBe(200);
+    expect(await ownerRecords.text()).toContain("quarantined");
+    const otherRecords = await call(other, "/v1/memory?include_pending=true");
+    expect(otherRecords.status).toBe(200);
+    expect(await otherRecords.text()).not.toContain("rejected-memory");
+  });
+
   it("replays an offline memory write idempotently and rejects key reuse with changed content", async () => {
     const device = await enrolDevice("memory-idempotency-" + crypto.randomUUID(), "Memory idempotency device");
     const key = "memory-idem-" + crypto.randomUUID();

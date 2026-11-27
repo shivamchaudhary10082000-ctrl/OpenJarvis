@@ -32,8 +32,8 @@ jobs:
           import tempfile
 
           paths = sorted(glob.glob("infra/cloudflare/migrations/*.sql"))
-          expected = [f"{n:04d}_" for n in range(1, 12)]
-          assert len(paths) == 11, f"Expected exactly 11 migrations, found {len(paths)}"
+          expected = [f"{n:04d}_" for n in range(1, 13)]
+          assert len(paths) == 12, f"Expected exactly 12 migrations, found {len(paths)}"
           for path, prefix in zip(paths, expected, strict=True):
               assert os.path.basename(path).startswith(prefix), f"Unexpected migration order: {path}"
 

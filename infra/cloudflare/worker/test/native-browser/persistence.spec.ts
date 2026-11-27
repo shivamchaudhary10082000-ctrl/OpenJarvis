@@ -106,3 +106,82 @@ test("ciphertext outbox survives reload and replays with the original idempotenc
   expect(capturedBody).toMatchObject({ payload_ciphertext: "ciphertext", payload_nonce: "nonce" });
   expect(capturedBody).not.toHaveProperty("plaintext");
 });
+
+
+test("memory management lists every page, including pending and rejected revisions", async ({ page }) => {
+  await page.goto("/");
+  const scope = newScope();
+  const requests: URL[] = [];
+  await page.route("https://neo.test/**", async (route) => {
+    if (route.request().method() === "OPTIONS") {
+      await route.fulfill({ status: 204, headers: {
+        "access-control-allow-origin": "*",
+        "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+        "access-control-allow-headers": "authorization, content-type, x-neo-device-id, x-neo-timestamp, x-neo-nonce, x-neo-signature, idempotency-key, if-match",
+      } });
+      return;
+    }
+    const url = new URL(route.request().url());
+    requests.push(url);
+    const cursor = url.searchParams.get("cursor");
+    await route.fulfill({
+      status: 200,
+      headers: { "access-control-allow-origin": "*", "content-type": "application/json" },
+      body: JSON.stringify(cursor ? {
+        records: [{ memory_id: "rejected-memory", revision: 2, trust_state: "rejected", payload_ciphertext: "ciphertext", payload_nonce: "nonce", key_version: 1 }],
+        next_cursor: null,
+      } : {
+        records: [{ memory_id: "pending-memory", revision: 1, trust_state: "pending", payload_ciphertext: "ciphertext", payload_nonce: "nonce", key_version: 1 }],
+        next_cursor: "page-two",
+      }),
+    });
+  });
+  const records = await page.evaluate(async (s) => (await window.neoTest.create(s)).listMemoryForManagement(), scope);
+  expect(records.map((record) => [record.memory_id, record.trust_state])).toEqual([
+    ["pending-memory", "pending"],
+    ["rejected-memory", "rejected"],
+  ]);
+  expect(requests).toHaveLength(2);
+  expect(requests[0].searchParams.get("include_pending")).toBe("true");
+  expect(requests[0].searchParams.has("cursor")).toBe(false);
+  expect(requests[1].searchParams.get("include_pending")).toBe("true");
+  expect(requests[1].searchParams.get("cursor")).toBe("page-two");
+});
+
+test("memory review actions send revision preconditions to their exact endpoints", async ({ page }) => {
+  await page.goto("/");
+  const scope = newScope();
+  const mutations: Array<{ method: string; path: string; revision: string | null }> = [];
+  await page.route("https://neo.test/**", async (route) => {
+    if (route.request().method() === "OPTIONS") {
+      await route.fulfill({ status: 204, headers: {
+        "access-control-allow-origin": "*",
+        "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+        "access-control-allow-headers": "authorization, content-type, x-neo-device-id, x-neo-timestamp, x-neo-nonce, x-neo-signature, idempotency-key, if-match",
+      } });
+      return;
+    }
+    const request = route.request();
+    mutations.push({
+      method: request.method(),
+      path: new URL(request.url()).pathname,
+      revision: request.headers()["if-match"] ?? null,
+    });
+    await route.fulfill({
+      status: request.method() === "DELETE" ? 204 : 200,
+      headers: { "access-control-allow-origin": "*", "content-type": "application/json" },
+      body: request.method() === "DELETE" ? "" : JSON.stringify({ accepted: true }),
+    });
+  });
+  await page.evaluate(async (s) => {
+    const client = await window.neoTest.create(s);
+    await client.approveMemory("pending-memory", 4);
+    await client.rejectMemory("pending-memory", 5);
+    await client.deleteMemory("approved-memory", 8);
+  }, scope);
+  expect(mutations).toEqual([
+    { method: "POST", path: "/memory/pending-memory/approve", revision: "4" },
+    { method: "POST", path: "/memory/pending-memory/reject", revision: "5" },
+    { method: "DELETE", path: "/memory/approved-memory", revision: "8" },
+  ]);
+});

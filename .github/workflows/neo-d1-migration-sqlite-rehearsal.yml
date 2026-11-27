@@ -65,6 +65,36 @@ jobs:
                   print(f"PASS schema objects created: {len(objects)}")
                   for kind, name in objects:
                       print(f"SCHEMA {kind}: {name}")
+
+                  # Exercise the exact provider-ledger migration triggers, not just schema creation.
+                  db.execute("INSERT INTO accounts(account_id,created_at,status) VALUES('migration-ledger-test',1,'active')")
+                  db.execute("""INSERT INTO provider_spend_usage(account_id,month_key,budget_microusd,monthly_input_token_limit,monthly_output_token_limit,updated_at)
+                               VALUES('migration-ledger-test','2099-01',1000,100,100,1)""")
+                  db.execute("""INSERT INTO provider_spend_reservations(reservation_id,account_id,month_key,reserved_microusd,reserved_input_tokens,reserved_output_tokens,state,provider_label,created_at)
+                               VALUES('ledger-res-1','migration-ledger-test','2099-01',400,40,40,'reserved','rehearsal',2)""")
+                  usage = db.execute("SELECT reserved_microusd,reserved_input_tokens,reserved_output_tokens FROM provider_spend_usage WHERE account_id='migration-ledger-test'").fetchone()
+                  assert usage == (400,40,40), f"Reservation accounting mismatch: {usage}"
+                  try:
+                      db.execute("""INSERT INTO provider_spend_reservations(reservation_id,account_id,month_key,reserved_microusd,reserved_input_tokens,reserved_output_tokens,state,provider_label,created_at)
+                                    VALUES('ledger-res-over','migration-ledger-test','2099-01',700,70,70,'reserved','over-cap',3)""")
+                      raise AssertionError("Over-budget reservation unexpectedly succeeded")
+                  except sqlite3.IntegrityError as exc:
+                      assert "exceeded" in str(exc), f"Unexpected reservation failure: {exc}"
+                  db.execute("""UPDATE provider_spend_reservations SET state='settled',settled_microusd=300,settled_input_tokens=30,settled_output_tokens=30,settled_at=4
+                                WHERE reservation_id='ledger-res-1'""")
+                  usage = db.execute("SELECT reserved_microusd,spent_microusd,reserved_input_tokens,reserved_output_tokens,input_tokens,output_tokens FROM provider_spend_usage WHERE account_id='migration-ledger-test'").fetchone()
+                  assert usage == (0,300,0,0,30,30), f"Settlement accounting mismatch: {usage}"
+                  try:
+                      db.execute("""UPDATE provider_spend_reservations SET settled_microusd=401 WHERE reservation_id='ledger-res-1'""")
+                      raise AssertionError("Post-settlement mutation unexpectedly succeeded")
+                  except sqlite3.IntegrityError:
+                      pass
+                  db.execute("""INSERT INTO provider_spend_reservations(reservation_id,account_id,month_key,reserved_microusd,reserved_input_tokens,reserved_output_tokens,state,provider_label,created_at)
+                                VALUES('ledger-res-2','migration-ledger-test','2099-01',200,20,20,'reserved','release-test',5)""")
+                  db.execute("UPDATE provider_spend_reservations SET state='released',settled_at=6 WHERE reservation_id='ledger-res-2'")
+                  usage = db.execute("SELECT reserved_microusd,spent_microusd,reserved_input_tokens,reserved_output_tokens,input_tokens,output_tokens FROM provider_spend_usage WHERE account_id='migration-ledger-test'").fetchone()
+                  assert usage == (0,300,0,0,30,30), f"Release accounting mismatch: {usage}"
+                  print("PASS provider reservation, over-budget rejection, settlement, immutable settled reservation, and release accounting")
               finally:
                   db.close()
           finally:

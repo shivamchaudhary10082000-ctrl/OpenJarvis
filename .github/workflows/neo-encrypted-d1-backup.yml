@@ -110,4 +110,4 @@ jobs:
           retention-days: 30
       - name: Cleanup plaintext export
         if: always()
-        run: rm -f /tmp/neo-staging-db.sql /tmp/wrangler-export.log /tmp/info.json
+        run: rm -f /tmp/neo-staging-db.sql /tmp/neo-staging-db.sql.age /tmp/SHA256SUMS /tmp/backup-manifest.txt /tmp/wrangler-export.log /tmp/info.json

@@ -17,6 +17,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install age and SQLite
         run: |
+          set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y age sqlite3
       - name: Create synthetic database fixture (no Cloudflare credentials)
@@ -25,7 +26,7 @@ jobs:
           mkdir -p /tmp/neo-backup-fixture
           sqlite3 /tmp/neo-backup-fixture/source.db <<'SQL'
           PRAGMA foreign_keys=ON;
-          CREATE TABLE rehearsal_records(id INTEGER PRIMARY KEY, label TEXT NOT NULL, created_at TEXT NOT NULL);
+          CREATE TABLE rehearsal_records(id INTEGER PRIMARY KEY, label TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
           INSERT INTO rehearsal_records(label,created_at) VALUES
             ('fixture-alpha','2026-01-01T00:00:00Z'),
             ('fixture-beta','2026-01-02T00:00:00Z');
@@ -37,11 +38,12 @@ jobs:
           set -euo pipefail
           age-keygen -o /tmp/neo-backup-fixture/test-key.txt
           recipient="$(grep '^# public key:' /tmp/neo-backup-fixture/test-key.txt | awk '{print $4}')"
-          test -n "$recipient"
+          [[ "$recipient" == age1* ]] || { echo "::error::Invalid synthetic age recipient."; exit 1; }
           age -r "$recipient" -o /tmp/neo-backup-fixture/fixture.sql.age /tmp/neo-backup-fixture/fixture.sql
           (cd /tmp/neo-backup-fixture && sha256sum fixture.sql.age > ciphertext.sha256)
           test -s /tmp/neo-backup-fixture/fixture.sql.age
-          echo "Ciphertext created before artifact upload."
+          test ! -s /tmp/neo-backup-fixture/fixture.sql.age || test "$(head -c 5 /tmp/neo-backup-fixture/fixture.sql.age)" != "SQLite"
+          echo "Synthetic ciphertext created before artifact upload."
       - name: Upload ciphertext and checksum only
         id: upload-rehearsal-artifact
         uses: actions/upload-artifact@v6
@@ -57,26 +59,38 @@ jobs:
         with:
           artifact-ids: ${{ steps.upload-rehearsal-artifact.outputs.artifact-id }}
           path: /tmp/neo-recovery-download
-      - name: Verify checksum, decrypt, restore to isolated SQLite, and validate
+      - name: Verify checksum, detect tampering, decrypt, restore, and validate
         run: |
           set -euo pipefail
           cd /tmp/neo-recovery-download
           sha256sum -c ciphertext.sha256
+          cp fixture.sql.age tampered.sql.age
+          printf 'tamper' >> tampered.sql.age
+          if sha256sum tampered.sql.age | awk '{print $1}' | grep -qx "$(awk '{print $1}' ciphertext.sha256)"; then
+            echo "::error::Tampered ciphertext incorrectly matched checksum."
+            exit 1
+          fi
+          rm tampered.sql.age
           age -d -i /tmp/neo-backup-fixture/test-key.txt -o restored.sql fixture.sql.age
           test -s restored.sql
           sqlite3 restored.db < restored.sql
           test "$(sqlite3 restored.db 'SELECT COUNT(*) FROM rehearsal_records;')" = "2"
           test "$(sqlite3 restored.db "SELECT label FROM rehearsal_records WHERE id=2;")" = "fixture-beta"
-          echo "Checksum verified, decrypted, isolated restore succeeded, and fixture data validated."
+          test "$(sqlite3 restored.db 'PRAGMA integrity_check;')" = "ok"
+          test -z "$(sqlite3 restored.db 'PRAGMA foreign_key_check;')"
+          echo "Checksum verified, tampering detected, decryption, isolated restore and validation passed."
       - name: Summary
         run: |
           {
             echo "## Encrypted backup artifact rehearsal"
-            echo "- Synthetic fixture only; no remote D1 access or credentials."
+            echo "- Synthetic fixture only; no Cloudflare credentials or remote D1 access."
             echo "- Encryption before upload: passed"
-            echo "- Artifact retention: 1 day"
-            echo "- Ciphertext checksum after download: passed"
+            echo "- Artifact download and ciphertext SHA-256: passed"
+            echo "- Tamper-detection assertion: passed"
             echo "- Decryption: passed"
-            echo "- Isolated SQLite restore and fixture validation: passed"
+            echo "- Isolated SQLite restore, integrity and fixture validation: passed"
             echo "- This is a pipeline rehearsal, not a backup of real staging D1."
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Cleanup synthetic sensitive material
+        if: always()
+        run: rm -rf /tmp/neo-backup-fixture /tmp/neo-recovery-download

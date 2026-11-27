@@ -676,7 +676,7 @@ describe("Offline memory recall selection", () => {
       { memory_id: "d", revision: 2, trust_state: "rejected", updated_at: 2 },
     ];
     expect(selectRecallableMemory(records).map(record => [record.memory_id, record.revision])).toEqual([
-      ["a", 1], ["d", 1], ["c", 3],
+      ["a", 1], ["c", 3],
     ]);
     expect(selectRecallableMemory(records, true).map(record => [record.memory_id, record.revision])).toEqual([
       ["a", 1], ["d", 1], ["a", 2], ["c", 3],

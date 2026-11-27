@@ -24,13 +24,13 @@ sqlite3 "$INPUT_DB" .dump | awk '
     }
     if (line ~ /^(insert into|replace into|delete from)[[:space:]]+["_]?_cf_kv["]?([[:space:]]|[(])/) next
     if (line ~ /^[[:space:]]*(begin transaction|commit);?[[:space:]]*$/) next
-    if (line ~ /^[[:space:]]*pragma foreign_keys[[:space:]]*=/) next
+    if (line ~ /^[[:space:]]*pragma[[:space:]]+foreign_keys([[:space:]]*=|[[:space:]]*;|[[:space:]]*$)/) next
     print
   }
 ' > "$OUTPUT_SQL"
 
 [[ -s "$OUTPUT_SQL" ]] || { echo "ERROR: Sanitized D1 import SQL is empty." >&2; exit 1; }
-if grep -Eiq 'CREATE TABLE.*_cf_KV|INSERT INTO.*_cf_KV|BEGIN TRANSACTION|COMMIT;' "$OUTPUT_SQL"; then
+if grep -Eiq 'CREATE TABLE.*_cf_KV|INSERT INTO.*_cf_KV|BEGIN TRANSACTION|COMMIT;|PRAGMA[[:space:]]+foreign_keys' "$OUTPUT_SQL"; then
   echo "ERROR: Sanitized SQL still contains a D1-incompatible transaction wrapper or reserved _cf_KV table." >&2
   exit 1
 fi

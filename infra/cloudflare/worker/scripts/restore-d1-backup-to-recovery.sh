@@ -14,7 +14,7 @@ BACKUP_DIR="${1:-}"
 
 fail() { echo "ERROR: $*" >&2; exit 1; }
 [[ -d "$BACKUP_DIR" ]] || fail "Pass the extracted encrypted backup artifact directory as the first argument."
-for cmd in age sqlite3 node npm realpath; do command -v "$cmd" >/dev/null 2>&1 || fail "Required command missing: $cmd"; done
+for cmd in age sqlite3 node npx realpath; do command -v "$cmd" >/dev/null 2>&1 || fail "Required command missing: $cmd"; done
 BACKUP_DIR="$(cd "$BACKUP_DIR" && pwd)"
 [[ -s "$AGE_IDENTITY_FILE" ]] || fail "Owner-held age identity file not found."
 AGE_IDENTITY_FILE="$(realpath "$AGE_IDENTITY_FILE")"
@@ -67,9 +67,8 @@ fs.writeFileSync(p,c);
 NODE
 
 cd "$WORKER_DIR"
-npm ci --ignore-scripts --no-audit --no-fund
 export CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
-npx wrangler d1 info "$TARGET_NAME" --json --config "$CONFIG" > "$TMP_DIR/target-info.json"
+npx --yes wrangler@4.157.0 d1 info "$TARGET_NAME" --json --config "$CONFIG" > "$TMP_DIR/target-info.json"
 node --input-type=module - "$TMP_DIR/target-info.json" "$TARGET_ID" <<'NODE'
 import fs from "node:fs";
 const j=JSON.parse(fs.readFileSync(process.argv[2],"utf8")), expected=process.argv[3], ids=[];
@@ -78,7 +77,7 @@ walk(j);
 if(!ids.includes(expected))throw new Error("Remote recovery database UUID mismatch; refusing restore");
 NODE
 
-npx wrangler d1 execute "$TARGET_NAME" --remote --config "$CONFIG" --command "SELECT COUNT(*) AS user_tables FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%';" --json > "$TMP_DIR/empty.json"
+npx --yes wrangler@4.157.0 d1 execute "$TARGET_NAME" --remote --config "$CONFIG" --command "SELECT COUNT(*) AS user_tables FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%';" --json > "$TMP_DIR/empty.json"
 node --input-type=module - "$TMP_DIR/empty.json" <<'NODE'
 import fs from "node:fs";
 const j=JSON.parse(fs.readFileSync(process.argv[2],"utf8")), vals=[];
@@ -90,7 +89,7 @@ NODE
 bash "$ROOT/infra/cloudflare/worker/scripts/prepare-d1-import.sh" "$TMP_DIR/source.db" "$TMP_DIR/import.sql"
 test -s "$TMP_DIR/import.sql" || fail "Sanitized import SQL is empty."
 echo "Preflight passed: source backup verified; remote target UUID matches and is empty; SQL sanitizer produced import."
-npx wrangler d1 execute "$TARGET_NAME" --remote --config "$CONFIG" --file="$TMP_DIR/import.sql"
+npx --yes wrangler@4.157.0 d1 execute "$TARGET_NAME" --remote --config "$CONFIG" --file="$TMP_DIR/import.sql"
 echo "SQL import completed. Comparing restored schema and every table's records against the decrypted source backup..."
 
 node --input-type=module - "$TMP_DIR/source.db" "$TARGET_NAME" "$CONFIG" <<'NODE'
@@ -137,7 +136,7 @@ console.log("Table record contents match: "+tables.length+" tables");
 console.log("Migration tracking, if present, was included in the schema and row-by-row comparison.");
 NODE
 
-npx wrangler d1 execute "$TARGET_NAME" --remote --config "$CONFIG" --command "PRAGMA integrity_check;" --json > "$TMP_DIR/integrity.json"
+npx --yes wrangler@4.157.0 d1 execute "$TARGET_NAME" --remote --config "$CONFIG" --command "PRAGMA integrity_check;" --json > "$TMP_DIR/integrity.json"
 node --input-type=module - "$TMP_DIR/integrity.json" <<'NODE'
 import fs from "node:fs";
 const j=JSON.parse(fs.readFileSync(process.argv[2],"utf8")), strings=[];
@@ -145,7 +144,7 @@ function walk(x){if(!x||typeof x!=="object")return;if(Array.isArray(x)){for(cons
 walk(j);
 if(!strings.includes("ok"))throw new Error("Remote D1 integrity_check did not return ok");
 NODE
-npx wrangler d1 execute "$TARGET_NAME" --remote --config "$CONFIG" --command "PRAGMA foreign_key_check;" --json > "$TMP_DIR/fk.json"
+npx --yes wrangler@4.157.0 d1 execute "$TARGET_NAME" --remote --config "$CONFIG" --command "PRAGMA foreign_key_check;" --json > "$TMP_DIR/fk.json"
 node --input-type=module - "$TMP_DIR/fk.json" <<'NODE'
 import fs from "node:fs";
 const j=JSON.parse(fs.readFileSync(process.argv[2],"utf8")), arrays=[];

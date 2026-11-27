@@ -17,7 +17,7 @@ Workflow run [#45910522233](https://github.com/shivamchaudhary10082000-ctrl/Open
 2. Retrieved a D1 Time Travel bookmark.
 3. Exported SQL to the ephemeral runner; Wrangler output was redirected so its short-lived signed download URL was not written to public logs.
 4. Inspected the remote migration list: **migrations 0001–0011 are pending**.
-5. Skipped R2 upload and skipped all schema writes. No remote migration was applied.
+5. Skipped encrypted artifact backup and all schema writes. No remote migration was applied.
 6. `infra/cloudflare/D1_MIGRATION_APPROVAL.txt` is `NO`.
 
 The export was temporary runner data, not a durable backup. A Time Travel bookmark is not a substitute for the required encrypted, independently recoverable backup.
@@ -50,7 +50,7 @@ Do not set `APPLY_0001_0011` merely to obtain a backup. Use the separate encrypt
 4. Decrypt locally with the owner-held private key. Never transmit that key to the runner, GitHub, repository, artifact, or chat.
 5. Run `infra/cloudflare/worker/scripts/restore-d1-backup-to-recovery.sh` locally. The script checks the source UUID, local SQLite integrity, exact recovery D1 UUID and empty-target precondition; it restores only to the recovery database; then compares schema definitions and all table row contents with the decrypted source and checks remote integrity and foreign keys.
 6. Retain the exact backup run ID, SHA-256 and successful restore output as evidence.
-7. Only after restore evidence is reviewed may the already-authorized disposable-source migration sequence be considered. The apply workflow must be re-reviewed to require a restore attestation tied to the exact backup hash and source UUID.
+7. Only after restore evidence is reviewed may the already-authorized disposable-source migration sequence be considered. The current apply workflow now requires a restore attestation tied to the exact backup run ID, ciphertext SHA-256 and source/recovery UUIDs, and revalidates the referenced artifact before applying.
 8. Verify all 11 migration-history entries; all expected tables, indexes and triggers; expected foreign-key relationships; and zero foreign-key violations. Do not enable scheduled maintenance until verification is complete.
 
 ## Synthetic artifact rehearsal is not staging recovery

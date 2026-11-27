@@ -966,7 +966,7 @@ describe("D1-backed encrypted memory and task concurrency", () => {
     expect(await otherFinal.text()).not.toContain("lifecycle-memory");
   });
 
-  it("rejects a pending memory with compare-and-swap, quarantines it, and prevents later approval", async () => {
+  it("rejects a pending memory with compare-and-swap, records rejection, and prevents later approval", async () => {
     const owner = await enrolDevice("memory-rejection-owner-" + crypto.randomUUID(), "Memory rejection owner");
     const other = await enrolDevice("memory-rejection-other-" + crypto.randomUUID(), "Other account");
     const created = await call(owner, "/v1/memory", {
@@ -985,7 +985,7 @@ describe("D1-backed encrypted memory and task concurrency", () => {
     });
     expect(rejected.status).toBe(200);
     expect(await rejected.json()).toMatchObject({
-      memory_id: "rejected-memory", revision: pending.revision + 1, trust_state: "quarantined",
+      memory_id: "rejected-memory", revision: pending.revision + 1, trust_state: "rejected",
     });
 
     const staleReject = await call(owner, "/v1/memory/rejected-memory/reject", {

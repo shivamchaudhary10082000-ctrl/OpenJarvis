@@ -132,7 +132,7 @@ npx wrangler d1 execute "$TARGET_NAME" --remote --config "$CONFIG" --command "PR
 node --input-type=module - "$TMP_DIR/fk.json" <<'NODE'
 import fs from "node:fs";
 const j=JSON.parse(fs.readFileSync(process.argv[2],"utf8")), arrays=[];
-function walk(x){if(!x||typeof x!=="object")return;if(Array.isArray(x)){for(const v of x)walk(v);return;}for(const [k,v] of Object.entries(x)){if(k==="results"&&Array.isArray(v))arrays.push(v);walk(v);}}
+function walk(x){if(!x||typeof x!=="object")return;if(Array.isArray(x)){for(const v of x)walk(v);return;}for(const [k,v] of Object.entries(x)){if(k==="results"&&Array.isArray(v)&&v.every(row=>row&&typeof row==="object"&&!Array.isArray(row)&&!("results" in row)))arrays.push(v);walk(v);}}
 walk(j);
 if(!arrays.length||arrays.some(x=>x.length!==0))throw new Error("Remote D1 foreign-key check failed or returned an unrecognized result");
 NODE

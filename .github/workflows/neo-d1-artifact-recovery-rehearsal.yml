@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/neo-d1-artifact-recovery-rehearsal.yml
       - infra/cloudflare/worker/scripts/restore-d1-backup-to-recovery.sh
+      - .github/workflows/neo-encrypted-d1-backup.yml
       - infra/cloudflare/D1_STAGING_RUNBOOK.md
       - infra/cloudflare/worker/D1_BACKUP_RECOVERY_RUNBOOK.md
 permissions:
@@ -32,7 +33,16 @@ jobs:
             echo "::error::Owner-local restore script must not require GitHub-held private keys or R2."
             exit 1
           fi
-          echo "Restore script syntax and hard-coded source/target safety checks passed."
+          backup=.github/workflows/neo-encrypted-d1-backup.yml
+          grep -Fq "if: inputs.confirm_backup == true && github.ref == 'refs/heads/neo/foundation-architecture'" "$backup"
+          grep -Fq 'age --encrypt --recipient "$AGE_RECIPIENT"' "$backup"
+          grep -Fq 'actions/upload-artifact@v4' "$backup"
+          grep -Fq 'Run ID: %s' "$backup"
+          if grep -Eq 'AGE_IDENTITY|R2_BUCKET|r2\\.cloudflarestorage|wrangler d1 migrations apply' "$backup"; then
+            echo "::error::Backup workflow must not hold the owner private key, depend on R2, or apply migrations."
+            exit 1
+          fi
+          echo "Restore script syntax, fixed D1 identities and backup-only workflow safety checks passed."
       - name: Install age and SQLite
         run: |
           set -euo pipefail

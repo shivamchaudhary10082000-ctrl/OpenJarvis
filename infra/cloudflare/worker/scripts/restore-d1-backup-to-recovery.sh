@@ -102,7 +102,7 @@ function local(sql){
   return JSON.parse(r.stdout||"[]");
 }
 function remoteRows(sql){
-  const r=spawnSync("npx",["wrangler","d1","execute",target,"--remote","--config",config,"--command",sql,"--json"],{encoding:"utf8"});
+  const r=spawnSync("npx",["--yes","wrangler@4.157.0","d1","execute",target,"--remote","--config",config,"--command",sql,"--json"],{encoding:"utf8"});
   if(r.status!==0)throw new Error("Remote D1 comparison query failed: "+r.stderr);
   const j=JSON.parse(r.stdout), candidates=[];
   function walk(x){

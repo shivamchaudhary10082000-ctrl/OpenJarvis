@@ -56,6 +56,21 @@ jobs:
           sudo apt-get install -y -qq age sqlite3
           cd infra/cloudflare/worker
           npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify the selected run is a successful staging backup workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BACKUP_RUN_ID" > /tmp/backup-run.json
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          const r=JSON.parse(fs.readFileSync("/tmp/backup-run.json","utf8"));
+          if(r.path!==".github/workflows/neo-encrypted-d1-backup.yml")throw new Error("Selected run is not the approved encrypted D1 backup workflow");
+          if(r.conclusion!=="success"||r.status!=="completed")throw new Error("Selected backup workflow run did not complete successfully");
+          if(r.head_branch!=="neo/foundation-architecture")throw new Error("Backup was not produced from the engineering branch");
+          if(r.event!=="workflow_dispatch")throw new Error("Backup must be explicitly dispatched");
+          NODE
       - name: Download the encrypted backup artifact from the selected run
         uses: actions/download-artifact@v7
         with:
@@ -155,10 +170,11 @@ jobs:
           node --input-type=module <<'NODE'
           import fs from "node:fs";
           const j=JSON.parse(fs.readFileSync("/tmp/recovery-fk.json","utf8"));
-          const rows=[];
-          function walk(x){if(!x||typeof x!=="object")return;if(Array.isArray(x)){for(const v of x)walk(v);return;}if(Array.isArray(x.results))rows.push(...x.results);for(const v of Object.values(x))walk(v);}
+          const resultArrays=[];
+          function walk(x){if(!x||typeof x!=="object")return;if(Array.isArray(x)){for(const v of x)walk(v);return;}for(const [k,v] of Object.entries(x)){if(k==="results"&&Array.isArray(v))resultArrays.push(v);walk(v);}}
           walk(j);
-          if(rows.some(x=>Array.isArray(x)&&x.length))throw new Error("Remote foreign-key violations found");
+          if(resultArrays.length===0)throw new Error("Could not locate foreign_key_check result rows");
+          if(resultArrays.some(rows=>rows.length!==0))throw new Error("Remote foreign-key violations found");
           NODE
           echo "Remote integrity and foreign-key checks passed."
       - name: Cleanup decrypted material

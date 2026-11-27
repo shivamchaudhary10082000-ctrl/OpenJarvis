@@ -20,6 +20,9 @@ const sendButton = $("send-button") as HTMLButtonElement;
 const messagesNode = $("messages");
 const clearButton = $("clear-button") as HTMLButtonElement;
 const logoutButton = $("logout-button") as HTMLButtonElement;
+const memoryRefreshButton = $("memory-refresh") as HTMLButtonElement;
+const memoryStatus = $("memory-status");
+const memoryRecordsNode = $("memory-records");
 let client: NeoDeviceClient | null = null;
 let history: ChatMessage[] = [];
 let busy = false;
@@ -39,6 +42,7 @@ function setConnected(label: string) {
   deviceLabel.textContent = label;
   welcome.hidden = true;
   chatPanel.hidden = false;
+  void refreshMemoryManagement();
 }
 function addMessage(role: "user" | "assistant", content: string) {
   const empty = messagesNode.querySelector(".empty-state");
@@ -54,6 +58,65 @@ function addMessage(role: "user" | "assistant", content: string) {
   messagesNode.append(wrapper);
   messagesNode.scrollTop = messagesNode.scrollHeight;
 }
+async function refreshMemoryManagement() {
+  if (!client) return;
+  memoryRefreshButton.setAttribute("disabled", "true");
+  memoryStatus.textContent = "Loading encrypted memory records…";
+  memoryRecordsNode.replaceChildren();
+  try {
+    const records = await client.listMemoryForManagement();
+    if (!records.length) {
+      memoryStatus.textContent = "No cloud memory records found.";
+      return;
+    }
+    memoryStatus.textContent = records.length + " encrypted record revisions loaded. Content stays encrypted on this device.";
+    for (const record of records) {
+      const memoryId = typeof record.memory_id === "string" ? record.memory_id : "";
+      const revision = typeof record.revision === "number" ? record.revision : 0;
+      const state = typeof record.trust_state === "string" ? record.trust_state : "unknown";
+      if (!memoryId || revision < 1) continue;
+      const row = document.createElement("article");
+      row.className = "memory-record";
+      const details = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = memoryId.slice(0, 12) + (memoryId.length > 12 ? "…" : "");
+      const meta = document.createElement("span");
+      meta.textContent = "Revision " + revision + " · " + state;
+      details.append(title, meta);
+      const actions = document.createElement("div");
+      actions.className = "memory-actions";
+      const actionButton = (label: string, action: () => Promise<void>, danger = false) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = danger ? "button button-danger" : "button button-outline";
+        button.textContent = label;
+        button.addEventListener("click", async () => {
+          button.disabled = true;
+          try { await action(); await refreshMemoryManagement(); }
+          catch (error) { memoryStatus.textContent = error instanceof Error ? error.message : "Memory action failed"; button.disabled = false; }
+        });
+        actions.append(button);
+      };
+      if (state === "pending") {
+        actionButton("Approve", async () => { await client!.approveMemory(memoryId, revision); });
+        actionButton("Reject", async () => { await client!.rejectMemory(memoryId, revision); }, true);
+      } else if (state === "approved") {
+        actionButton("Delete", async () => {
+          if (!window.confirm("Delete this memory across NEO devices?")) return;
+          await client!.deleteMemory(memoryId, revision);
+        }, true);
+      }
+      row.append(details, actions);
+      memoryRecordsNode.append(row);
+    }
+  } catch (error) {
+    memoryStatus.textContent = error instanceof Error ? error.message : "Could not load cloud memory";
+  } finally {
+    memoryRefreshButton.removeAttribute("disabled");
+  }
+}
+memoryRefreshButton.addEventListener("click", () => void refreshMemoryManagement());
+
 async function connect() {
   clearError();
   connectionState.textContent = "Connecting…";

@@ -4,10 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       confirm_backup:
-        description: "Confirm read-only SQL export of neo-staging-db (no migrations or writes)"
+        description: "Confirm encrypted SQL export of neo-staging-db (no migrations or SQL writes)"
         required: true
         type: boolean
         default: false
+  push:
+    branches:
+      - neo/foundation-architecture
+    paths:
+      - .github/workflows/neo-encrypted-d1-backup.yml
+      - infra/cloudflare/D1_BACKUP_EXECUTION_APPROVAL.txt
 
 permissions:
   contents: read
@@ -18,7 +24,12 @@ concurrency:
 
 jobs:
   export-encrypt:
-    if: inputs.confirm_backup == true && github.ref == 'refs/heads/neo/foundation-architecture'
+    if: |
+      github.ref == 'refs/heads/neo/foundation-architecture' &&
+      (
+        (github.event_name == 'workflow_dispatch' && inputs.confirm_backup == true) ||
+        (github.event_name == 'push' && github.event.head_commit.message == 'NEO: EXECUTE ONE-TIME STAGING BACKUP')
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -35,7 +46,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Set secret CLOUDFLARE_D1_BACKUP_TOKEN (scoped to the staging database)."; exit 1; }
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            approval="$(tr -d '[:space:]' < infra/cloudflare/D1_BACKUP_EXECUTION_APPROVAL.txt)"
+            [[ "$approval" == "YES" ]] || { echo "::error::Backup approval file must contain exactly YES."; exit 1; }
+          fi
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Missing CLOUDFLARE_D1_BACKUP_TOKEN."; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::Missing CLOUDFLARE_ACCOUNT_ID variable."; exit 1; }
           [[ "$AGE_RECIPIENT" == age1* ]] || { echo "::error::Set NEO_BACKUP_AGE_RECIPIENT to the owner's age public key."; exit 1; }
       - name: Install age

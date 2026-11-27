@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   export-encrypt:
-    if: inputs.confirm_backup == true
+    if: inputs.confirm_backup == true && github.ref == 'refs/heads/neo/foundation-architecture'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -96,7 +96,7 @@ jobs:
           age --encrypt --recipient "$AGE_RECIPIENT" --output /tmp/neo-staging-db.sql.age /tmp/neo-staging-db.sql
           test -s /tmp/neo-staging-db.sql.age
           sha256sum /tmp/neo-staging-db.sql.age >/tmp/SHA256SUMS
-          printf 'Database UUID: %s\nCommit: %s\nCreated UTC: %s\n' "$EXPECTED_D1_ID" "$GITHUB_SHA" "$(date -u +%FT%TZ)" >/tmp/backup-manifest.txt
+          printf 'Database UUID: %s\nCommit: %s\nRun ID: %s\nRun attempt: %s\nCreated UTC: %s\n' "$EXPECTED_D1_ID" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$(date -u +%FT%TZ)" >/tmp/backup-manifest.txt
           echo "Only encrypted SQL, checksum, and metadata manifest will be uploaded."
       - name: Upload encrypted backup artifact
         uses: actions/upload-artifact@v4

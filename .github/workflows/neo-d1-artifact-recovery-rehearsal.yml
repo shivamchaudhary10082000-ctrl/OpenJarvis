@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/neo-d1-artifact-recovery-rehearsal.yml
       - infra/cloudflare/worker/scripts/restore-d1-backup-to-recovery.sh
+      - infra/cloudflare/worker/scripts/prepare-d1-import.sh
       - .github/workflows/neo-encrypted-d1-backup.yml
       - .github/workflows/neo-disposable-staging.yml
       - infra/cloudflare/D1_RESTORE_ATTESTATION.txt
@@ -27,6 +28,7 @@ jobs:
           set -euo pipefail
           script=infra/cloudflare/worker/scripts/restore-d1-backup-to-recovery.sh
           bash -n "$script"
+          bash -n infra/cloudflare/worker/scripts/prepare-d1-import.sh
           grep -Fq 'TARGET_ID="a426343d-7c85-4441-a46a-7b7cead38ceb"' "$script"
           grep -Fq 'TARGET_NAME="neo-staging-recovery-test"' "$script"
           grep -Fq 'SOURCE_ID="dd4c03d6-a286-4ac9-abbc-8f162b692acc"' "$script"
@@ -65,6 +67,30 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y age sqlite3
+      - name: Test D1 SQL sanitizer with transaction wrappers and reserved table
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/neo-d1-sanitizer
+          sqlite3 /tmp/neo-d1-sanitizer/source.db <<'SQL'
+          CREATE TABLE rehearsal_records(id INTEGER PRIMARY KEY, label TEXT NOT NULL);
+          INSERT INTO rehearsal_records VALUES (1,'kept-record');
+          CREATE TABLE _cf_KV(key TEXT PRIMARY KEY, value BLOB) WITHOUT ROWID;
+          INSERT INTO _cf_KV VALUES ('internal','must-not-import');
+          SQL
+          bash infra/cloudflare/worker/scripts/prepare-d1-import.sh /tmp/neo-d1-sanitizer/source.db /tmp/neo-d1-sanitizer/import.sql
+          if grep -Eiq 'BEGIN TRANSACTION|COMMIT;|_cf_KV' /tmp/neo-d1-sanitizer/import.sql; then
+            echo "::error::D1 sanitizer left an incompatible statement in the import file."
+            exit 1
+          fi
+          sqlite3 /tmp/neo-d1-sanitizer/restored.db < /tmp/neo-d1-sanitizer/import.sql
+          test "$(sqlite3 /tmp/neo-d1-sanitizer/restored.db 'SELECT label FROM rehearsal_records WHERE id=1;')" = "kept-record"
+          test "$(sqlite3 /tmp/neo-d1-sanitizer/restored.db "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='_cf_KV';")" = "0"
+          test "$(sqlite3 /tmp/neo-d1-sanitizer/restored.db 'PRAGMA integrity_check;')" = "ok"
+          echo "D1 SQL sanitizer preserved user records and removed transaction wrappers and reserved _cf_KV."
+      - name: Cleanup D1 sanitizer fixture
+        if: always()
+        run: rm -rf /tmp/neo-d1-sanitizer
       - name: Create synthetic database fixture (no Cloudflare credentials)
         run: |
           set -euo pipefail

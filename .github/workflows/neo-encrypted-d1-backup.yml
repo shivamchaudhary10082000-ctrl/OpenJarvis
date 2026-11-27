@@ -95,7 +95,7 @@ jobs:
           set -euo pipefail
           age --encrypt --recipient "$AGE_RECIPIENT" --output /tmp/neo-staging-db.sql.age /tmp/neo-staging-db.sql
           test -s /tmp/neo-staging-db.sql.age
-          sha256sum /tmp/neo-staging-db.sql.age >/tmp/SHA256SUMS
+          (cd /tmp && sha256sum neo-staging-db.sql.age > /tmp/SHA256SUMS)
           printf 'Database UUID: %s\nCommit: %s\nRun ID: %s\nRun attempt: %s\nCreated UTC: %s\n' "$EXPECTED_D1_ID" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$(date -u +%FT%TZ)" >/tmp/backup-manifest.txt
           echo "Only encrypted SQL, checksum, and metadata manifest will be uploaded."
       - name: Upload encrypted backup artifact

@@ -585,7 +585,7 @@ async function route(req: Request, env: Env): Promise<Response> {
       if (cursorRowId === null) return fail(400, "invalid_cursor", "Invalid memory sync cursor");
       const includePending = url.searchParams.get("include_pending") === "true";
       const pendingState = includePending ? "pending" : "approved";
-      const rows = await env.DB.prepare("SELECT rowid AS sync_id, memory_id, revision, trust_state, payload_ciphertext, payload_nonce, key_version, source_device_id, source_kind, created_at, updated_at, tombstoned_at FROM memory_records WHERE account_id = ? AND rowid > ? AND trust_state IN ('approved','deleted',?) ORDER BY rowid LIMIT 200").bind(account,cursorRowId,pendingState).all();
+      const rows = await env.DB.prepare("SELECT rowid AS sync_id, memory_id, revision, trust_state, payload_ciphertext, payload_nonce, key_version, source_device_id, source_kind, created_at, updated_at, tombstoned_at FROM memory_records WHERE account_id = ? AND rowid > ? AND (trust_state IN ('approved','deleted') OR (? = 1 AND trust_state IN ('pending','rejected','quarantined'))) ORDER BY rowid LIMIT 200").bind(account,cursorRowId,includePending ? 1 : 0).all();
       const last = rows.results.length ? rows.results[rows.results.length - 1] as any : null;
       const next = last ? encodeMemoryCursor(Number(last.sync_id)) : null;
       const records = rows.results.map((row: any) => ({

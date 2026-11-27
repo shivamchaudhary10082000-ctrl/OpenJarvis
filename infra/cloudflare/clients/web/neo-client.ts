@@ -243,6 +243,14 @@ export class NeoDeviceClient {
     const r=await this.request("/memory/"+encodeURIComponent(memoryId)+"/approve",{method:"POST",headers:{"if-match":String(revision)}});
     if(!r.ok)throw new Error("Memory approval failed: "+r.status); return r.json();
   }
+  async rejectMemory(memoryId:string,revision:number){
+    const r=await this.request("/memory/"+encodeURIComponent(memoryId)+"/reject",{method:"POST",headers:{"if-match":String(revision)}});
+    if(!r.ok)throw new Error("Memory rejection failed: "+r.status); return r.json();
+  }
+  async deleteMemory(memoryId:string,revision:number){
+    const r=await this.request("/memory/"+encodeURIComponent(memoryId),{method:"DELETE",headers:{"if-match":String(revision)}});
+    if(!r.ok)throw new Error("Memory deletion failed: "+r.status);
+  }
   async queueTask(
     input:{task_kind:string;payload_ciphertext:string;payload_nonce:string;key_version:number;required_capabilities?:string[]},
     idempotencyKey=randomId(),

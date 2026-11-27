@@ -38,7 +38,7 @@ jobs:
           grep -Fq 'age --encrypt --recipient "$AGE_RECIPIENT"' "$backup"
           grep -Fq 'actions/upload-artifact@v4' "$backup"
           grep -Fq 'Run ID: %s' "$backup"
-          if grep -Eq 'AGE_IDENTITY|R2_BUCKET|r2\\.cloudflarestorage|wrangler d1 migrations apply' "$backup"; then
+          if grep -Eq 'AGE_IDENTITY|R2_BUCKET|r2[.]cloudflarestorage|wrangler d1 migrations apply' "$backup"; then
             echo "::error::Backup workflow must not hold the owner private key, depend on R2, or apply migrations."
             exit 1
           fi

@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: neo-disposable-staging-deploy
@@ -136,6 +137,12 @@ jobs:
           else
             echo "::error::Approval file and commit message do not match an allowed action. Use PREFLIGHT_ONLY with [neo-d1-preflight], or APPLY_0001_0011 with [neo-d1-apply]."
             exit 1
+          fi
+          if [[ "$approval" == "APPLY_0001_0011" ]]; then
+            test -f infra/cloudflare/D1_RESTORE_ATTESTATION.txt || { echo "::error::Missing restore attestation file."; exit 1; }
+            grep -Fqx "RESTORE_VERIFIED=YES" infra/cloudflare/D1_RESTORE_ATTESTATION.txt || { echo "::error::Owner-local recovery restore is not attested."; exit 1; }
+            grep -Fqx "SOURCE_D1_UUID=dd4c03d6-a286-4ac9-abbc-8f162b692acc" infra/cloudflare/D1_RESTORE_ATTESTATION.txt || { echo "::error::Restore attestation source UUID mismatch."; exit 1; }
+            grep -Fqx "RECOVERY_D1_UUID=a426343d-7c85-4441-a46a-7b7cead38ceb" infra/cloudflare/D1_RESTORE_ATTESTATION.txt || { echo "::error::Restore attestation recovery UUID mismatch."; exit 1; }
           fi
 
       - name: Validate credentials and exact migration set
@@ -255,52 +262,67 @@ jobs:
         working-directory: infra/cloudflare/worker
         run: npx wrangler d1 migrations list neo-staging-db --remote --config ../wrangler.disposable.toml
 
-      - id: backup
-        name: Encrypt and retain a private backup before any D1 apply
+      - id: restore_attestation
+        name: Verify owner-local restore attestation and exact encrypted backup artifact
+        if: steps.approval.outputs.apply == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=infra/cloudflare/D1_RESTORE_ATTESTATION.txt
+          backup_run_id="$(sed -n 's/^BACKUP_RUN_ID=//p' "$file")"
+          backup_sha256="$(sed -n 's/^BACKUP_SHA256=//p' "$file")"
+          [[ "$backup_run_id" =~ ^[0-9]+$ ]] || { echo "::error::Restore attestation must include a numeric backup run ID."; exit 1; }
+          [[ "$backup_sha256" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::Restore attestation must include a SHA-256 hash."; exit 1; }
+          echo "backup_run_id=$backup_run_id" >> "$GITHUB_OUTPUT"
+          echo "backup_sha256=$backup_sha256" >> "$GITHUB_OUTPUT"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$backup_run_id" > /tmp/neo-backup-run.json
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          const r=JSON.parse(fs.readFileSync("/tmp/neo-backup-run.json","utf8"));
+          if(r.path!==".github/workflows/neo-encrypted-d1-backup.yml")throw new Error("Restore attestation references a run that is not the encrypted D1 backup workflow");
+          if(r.conclusion!=="success"||r.status!=="completed")throw new Error("Referenced encrypted backup run did not succeed");
+          if(r.head_branch!=="neo/foundation-architecture"||r.event!=="workflow_dispatch")throw new Error("Referenced backup run was not manually dispatched from the engineering branch");
+          NODE
+
+      - name: Download the exact backup artifact cited by restore attestation
+        if: steps.approval.outputs.apply == 'true'
+        uses: actions/download-artifact@v7
+        with:
+          name: neo-staging-d1-encrypted-backup-${{ steps.restore_attestation.outputs.backup_run_id }}
+          run-id: ${{ steps.restore_attestation.outputs.backup_run_id }}
+          github-token: ${{ github.token }}
+          path: /tmp/neo-staging-restore-attestation
+
+      - name: Verify backup hash and source identity against restore attestation
+        id: backup
         if: steps.approval.outputs.apply == 'true'
         shell: bash
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.NEO_R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.NEO_R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET_NAME: ${{ vars.NEO_R2_BUCKET_NAME }}
-          AGE_RECIPIENT: ${{ vars.NEO_BACKUP_AGE_RECIPIENT }}
+          EXPECTED_BACKUP_SHA256: ${{ steps.restore_attestation.outputs.backup_sha256 }}
         run: |
           set -euo pipefail
-          test -n "$AWS_ACCESS_KEY_ID" || { echo "::error::NEO_R2_ACCESS_KEY_ID secret is missing."; exit 1; }
-          test -n "$AWS_SECRET_ACCESS_KEY" || { echo "::error::NEO_R2_SECRET_ACCESS_KEY secret is missing."; exit 1; }
-          [[ "$R2_BUCKET_NAME" =~ ^[a-z0-9-]{3,63}$ ]] || { echo "::error::NEO_R2_BUCKET_NAME variable is missing or invalid."; exit 1; }
-          [[ "$AGE_RECIPIENT" == age1* ]] || { echo "::error::NEO_BACKUP_AGE_RECIPIENT variable is missing or invalid."; exit 1; }
-          command -v aws >/dev/null || { echo "::error::AWS CLI is unavailable on this runner."; exit 1; }
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq age
-          age --encrypt --recipient "$AGE_RECIPIENT" --output /tmp/neo-staging-pre-migration.sql.age /tmp/neo-staging-pre-migration.sql
-          test -s /tmp/neo-staging-pre-migration.sql.age
-          checksum="$(sha256sum /tmp/neo-staging-pre-migration.sql.age | awk '{print $1}')"
-          object_key="neo-staging-d1/$(date -u +%Y/%m/%d)/neo-staging-db-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sql.age"
-          endpoint="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          export AWS_DEFAULT_REGION=auto AWS_EC2_METADATA_DISABLED=true
-          aws s3 cp /tmp/neo-staging-pre-migration.sql.age "s3://${R2_BUCKET_NAME}/${object_key}" \
-            --endpoint-url "$endpoint" --no-progress --only-show-errors \
-            --metadata "database-id=${EXPECTED_D1_ID},commit=${GITHUB_SHA},sha256=${checksum}"
-          aws s3 cp "s3://${R2_BUCKET_NAME}/${object_key}" /tmp/neo-staging-backup-verify.sql.age \
-            --endpoint-url "$endpoint" --no-progress --only-show-errors
-          remote_checksum="$(sha256sum /tmp/neo-staging-backup-verify.sql.age | awk '{print $1}')"
-          test "$checksum" = "$remote_checksum" || { echo "::error::Uploaded encrypted backup checksum does not match."; exit 1; }
-          test -s /tmp/neo-staging-backup-verify.sql.age
+          cd /tmp/neo-staging-restore-attestation
+          test -s neo-staging-db.sql.age
+          test -s SHA256SUMS
+          test -s backup-manifest.txt
+          sha256sum -c SHA256SUMS
+          actual="$(awk 'NR==1 {print $1}' SHA256SUMS)"
+          test "$actual" = "$EXPECTED_BACKUP_SHA256" || { echo "::error::Backup artifact SHA-256 does not match restore attestation."; exit 1; }
+          grep -Fqx "Database UUID: $EXPECTED_D1_ID" backup-manifest.txt || { echo "::error::Backup source UUID mismatch."; exit 1; }
+          grep -Fqx "Run ID: ${{ steps.restore_attestation.outputs.backup_run_id }}" backup-manifest.txt || { echo "::error::Backup run ID mismatch."; exit 1; }
           echo "ready=true" >> "$GITHUB_OUTPUT"
           {
-            echo "### Encrypted private D1 backup"
-            echo ""
-            echo "- Bucket: `$R2_BUCKET_NAME`"
-            echo "- Object: `$object_key`"
-            echo "- Ciphertext SHA-256: `$checksum`"
-            echo "- Upload/download checksum: verified"
-            echo "- Database: `$EXPECTED_D1_ID`"
-            echo "- **Owner-held decryption and isolated restore rehearsal remain mandatory before migration approval.**"
-            echo ""
+            echo "### Owner-local restore attestation verified"
+            echo "- Backup run: ${{ steps.restore_attestation.outputs.backup_run_id }}"
+            echo "- Encrypted backup SHA-256: $actual"
+            echo "- Source D1 UUID: $EXPECTED_D1_ID"
+            echo "- Recovery D1 UUID: a426343d-7c85-4441-a46a-7b7cead38ceb"
+            echo "- Owner-local restore: explicitly attested"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Apply migrations only when explicitly approved and backup is verified
+      - name: Apply migrations only when explicitly approved and restore attestation is verified
         if: steps.approval.outputs.apply == 'true' && steps.backup.outputs.ready == 'true'
         working-directory: infra/cloudflare/worker
         run: npx wrangler d1 migrations apply neo-staging-db --remote --config ../wrangler.disposable.toml
@@ -328,6 +350,10 @@ jobs:
             }
           done
           echo "### D1 migrations applied and critical schema verified" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup backup attestation download
+        if: always()
+        run: rm -rf /tmp/neo-staging-restore-attestation /tmp/neo-backup-run.json
 
       - name: Confirm preflight-only run made no schema changes
         if: steps.approval.outputs.apply != 'true'

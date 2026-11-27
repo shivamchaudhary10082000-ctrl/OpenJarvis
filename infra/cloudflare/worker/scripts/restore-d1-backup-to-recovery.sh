@@ -14,8 +14,11 @@ BACKUP_DIR="${1:-}"
 
 fail() { echo "ERROR: $*" >&2; exit 1; }
 [[ -d "$BACKUP_DIR" ]] || fail "Pass the extracted encrypted backup artifact directory as the first argument."
-for cmd in age sqlite3 node npm; do command -v "$cmd" >/dev/null 2>&1 || fail "Required command missing: $cmd"; done
+for cmd in age sqlite3 node npm realpath; do command -v "$cmd" >/dev/null 2>&1 || fail "Required command missing: $cmd"; done
+BACKUP_DIR="$(cd "$BACKUP_DIR" && pwd)"
 [[ -s "$AGE_IDENTITY_FILE" ]] || fail "Owner-held age identity file not found."
+AGE_IDENTITY_FILE="$(realpath "$AGE_IDENTITY_FILE")"
+case "$AGE_IDENTITY_FILE" in "$ROOT"/*) fail "Keep the age private identity outside the repository."; esac
 [[ -s "$BACKUP_DIR/neo-staging-db.sql.age" && -s "$BACKUP_DIR/SHA256SUMS" && -s "$BACKUP_DIR/backup-manifest.txt" ]] || fail "Backup artifact is incomplete."
 grep -Fqx "Database UUID: $SOURCE_ID" "$BACKUP_DIR/backup-manifest.txt" || fail "Backup source UUID mismatch."
 (cd "$BACKUP_DIR" && sha256sum -c SHA256SUMS) || fail "Encrypted backup checksum failed."

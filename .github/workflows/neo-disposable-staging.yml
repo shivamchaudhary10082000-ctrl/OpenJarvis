@@ -284,7 +284,7 @@ jobs:
           if(r.path!==".github/workflows/neo-encrypted-d1-backup.yml")throw new Error("Restore attestation references a run that is not the encrypted D1 backup workflow");
           if(r.conclusion!=="success"||r.status!=="completed")throw new Error("Referenced encrypted backup run did not succeed");
           if(r.head_branch!=="neo/foundation-architecture"||r.event!=="workflow_dispatch")throw new Error("Referenced backup run was not manually dispatched from the engineering branch");
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, "backup_commit="+r.head_sha+"\\nbackup_attempt="+r.run_attempt+"\\n");
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, "backup_commit="+r.head_sha+"\nbackup_attempt="+r.run_attempt+"\n");
           NODE
 
       - name: Download the exact backup artifact cited by restore attestation

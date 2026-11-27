@@ -8,6 +8,7 @@ on:
       - .github/workflows/neo-d1-artifact-recovery-rehearsal.yml
       - infra/cloudflare/worker/scripts/restore-d1-backup-to-recovery.sh
       - infra/cloudflare/worker/scripts/prepare-d1-import.sh
+      - infra/cloudflare/worker/scripts/test-d1-import-sanitizer.sh
       - .github/workflows/neo-encrypted-d1-backup.yml
       - .github/workflows/neo-disposable-staging.yml
       - infra/cloudflare/D1_RESTORE_ATTESTATION.txt

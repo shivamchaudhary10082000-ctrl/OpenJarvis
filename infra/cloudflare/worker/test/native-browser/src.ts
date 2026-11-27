@@ -1,7 +1,9 @@
 import { NeoDeviceClient } from "../../../clients/web/neo-client";
 declare global {
   interface Window {
-    neoTest: { create(scope: string): Promise<NeoDeviceClient> };
+    neoTest: {
+      create(scope: string): Promise<NeoDeviceClient>;
+    };
   }
 }
 window.neoTest = {

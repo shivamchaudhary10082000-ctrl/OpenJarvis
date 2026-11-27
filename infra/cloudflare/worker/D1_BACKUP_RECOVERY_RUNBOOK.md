@@ -7,8 +7,7 @@ Status as of 2026-11-27: **real staging backup and restore are blocked; no NEO m
 - Source: disposable Cloudflare D1 database `neo-staging-db`, UUID `dd4c03d6-a286-4ac9-abbc-8f162b692acc`.
 - Recovery must use a separate disposable D1 database and a separate credential. Never restore over the source database.
 - The repository is public. Never place plaintext SQL, database rows, credentials, signed URLs, private keys, or unencrypted backups in repository files, commits, issues, pull requests, logs, or public Actions artifacts.
-- The age private key remains owner-held/offline. Only its public age recipient may be stored as a GitHub Actions variable. Never put the private key in GitHub secrets, the repository, a runner, an artifact, or chat.
-- No bucket, credential, or recovery database may be created by this workflow. If the existing private R2 bucket and least-privilege credentials cannot be proven, stop before backup or migration.
+- The age private key remains owner-held/offline. Only its public age recipient may be stored as a GitHub Actions variable. Never put the private key in GitHub secrets, the repository, a runner, an artifact, or chat. The backup/recovery path uses encrypted GitHub Actions artifacts and an owner-local restore script; it has no R2 dependency.
 
 ## Latest read-only preflight evidence
 
@@ -34,22 +33,23 @@ There is **no backup-only mode and no pause for owner-held decryption plus isola
 
 The existing apply workflow also does not yet provide a complete post-migration proof of all 11 migration-history entries and every foreign-key definition. Its current checks cover a subset of core tables, provider/OIDC triggers, and browser-session indexes. A future apply run must strengthen and record the full schema verification before it can be considered complete.
 
-## Credentials and R2 status
+## Credentials and artifact storage status
 
-- The last successful preflight used the existing D1 migration credential for read/export. The previously inspected token had account-wide D1 Write scope because Cloudflare's permission UI did not offer the desired database-level selector. That is not an acceptable least-privilege credential for this recovery operation. Do not reuse it as a workaround or broaden any permission.
-- The preflight did not run the R2 step. The repository has no successful evidence of an R2 upload, R2 download, or owner-held restore. The current GitHub connector cannot reveal secret values or enumerate the Cloudflare account's R2 buckets, so an unexecuted step must not be treated as proof that the bucket or credentials exist.
-- Required before proceeding: an existing private R2 bucket; bucket-scoped Object Read + Object Write credentials only; a D1 read/export credential restricted as narrowly as Cloudflare permits to the exact disposable source; the public age recipient; and a separate disposable recovery D1 target with a separately scoped credential.
-- Do not reuse the Worker deployment token for D1 or R2. Do not use the broad D1 Write token for a backup. Do not create a new bucket, recovery database, or broader token under this authorization.
+- The last successful preflight used the existing D1 migration credential for read/export. The previously inspected token had account-wide D1 Write scope. That is not acceptable as a least-privilege recovery credential. Do not reuse it as a workaround or broaden permissions.
+- No R2 bucket is part of this design. Encrypted GitHub Actions artifacts are used instead; only ciphertext, checksum and non-sensitive metadata are uploaded.
+- The backup workflow requires a separate D1 export credential scoped to the exact disposable source, plus the public age recipient.
+- The owner-local restore script requires a separate D1 write credential scoped only to the newly created recovery database. The private age identity stays on the owner's device and is never added to GitHub.
+- Do not reuse the Worker deployment token for D1. Do not use the broad D1 Write token for backup or restore.
 
 ## Required recovery sequence
 
-1. Add a separate, reviewed **backup-only** workflow path. It must use read/export-only D1 access and bucket-scoped R2 object access; it must never apply migrations.
-2. Verify the exact source UUID before export. Keep Wrangler's signed export URL and SQL output out of logs.
-3. Encrypt the SQL on the ephemeral runner with the owner's public age recipient before upload. Upload only ciphertext to the existing private R2 bucket.
-4. Download the same object again and verify the ciphertext SHA-256. Record the object key, source UUID, ciphertext hash, UTC time, and workflow run ID.
-5. Owner downloads the ciphertext and decrypts it offline using the owner-held private key. Never transmit that key to the runner.
-6. Restore the decrypted SQL into a different disposable recovery D1 database, not the source. Verify the restore's migration history, tables, indexes, triggers, foreign-key definitions, and `PRAGMA foreign_key_check`; retain evidence tied to the same backup object and hash.
-7. Only after that restore is proven may the already-authorized disposable-source migration sequence be enabled. The apply workflow must verify that its restore attestation refers to the exact backup hash and source UUID, re-check the target UUID, apply only migrations 0001–0011, and leave the approval file at `NO` afterwards.
+1. Use the backup-only workflow to export the exact staging D1 UUID. It must never apply migrations.
+2. Encrypt the SQL on the ephemeral runner with the owner's public age recipient before upload to the time-limited GitHub Actions artifact.
+3. Download the same artifact to the owner's device and verify the ciphertext SHA-256.
+4. Decrypt locally with the owner-held private key. Never transmit that key to the runner, GitHub, repository, artifact, or chat.
+5. Run `infra/cloudflare/worker/scripts/restore-d1-backup-to-recovery.sh` locally. The script checks the source UUID, local SQLite integrity, exact recovery D1 UUID and empty-target precondition; it restores only to the recovery database; then compares schema definitions and all table row contents with the decrypted source and checks remote integrity and foreign keys.
+6. Retain the exact backup run ID, SHA-256 and successful restore output as evidence.
+7. Only after restore evidence is reviewed may the already-authorized disposable-source migration sequence be considered. The apply workflow must be re-reviewed to require a restore attestation tied to the exact backup hash and source UUID.
 8. Verify all 11 migration-history entries; all expected tables, indexes and triggers; expected foreign-key relationships; and zero foreign-key violations. Do not enable scheduled maintenance until verification is complete.
 
 ## Synthetic artifact rehearsal is not staging recovery

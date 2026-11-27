@@ -40,31 +40,9 @@ sqlite3 "$TMP_DIR/source.db" < "$TMP_DIR/neo-staging-db.sql"
 [[ -z "$(sqlite3 "$TMP_DIR/source.db" 'PRAGMA foreign_key_check;')" ]] || fail "Local source has foreign-key violations."
 
 # D1's import path does not accept SQLite transaction wrappers or its reserved
-# _cf_KV system table. Re-dump the validated local copy, filtering only those
-# D1-incompatible wrappers/system-table statements before remote import.
-sqlite3 "$TMP_DIR/source.db" .dump | awk '
-  BEGIN { skip_cf_table = 0 }
-  {
-    line = tolower($0)
-    if (!skip_cf_table && line ~ /^create table( if not exists)?[[:space:]]+["]?_cf_kv["]?([[:space:]]|[(])/) {
-      skip_cf_table = 1
-      if ($0 ~ /\)[[:space:]]*(WITHOUT ROWID)?;[[:space:]]*$/) skip_cf_table = 0
-      next
-    }
-    if (skip_cf_table) {
-      if ($0 ~ /\)[[:space:]]*(WITHOUT ROWID)?;[[:space:]]*$/) skip_cf_table = 0
-      next
-    }
-    if (line ~ /^(insert into|replace into|delete from)[[:space:]]+["]?_cf_kv["]?([[:space:]]|[(])/) next
-    if (line ~ /^[[:space:]]*(begin transaction|commit);?[[:space:]]*$/) next
-    if (line ~ /^[[:space:]]*pragma foreign_keys[[:space:]]*=/) next
-    print
-  }
-' > "$TMP_DIR/neo-staging-db-d1-import.sql"
-test -s "$TMP_DIR/neo-staging-db-d1-import.sql" || fail "D1-compatible import SQL is empty."
-if grep -Eiq 'CREATE TABLE.*_cf_KV|INSERT INTO.*_cf_KV' "$TMP_DIR/neo-staging-db-d1-import.sql"; then
-  fail "D1-compatible import still contains the reserved _cf_KV system table."
-fi
+# _cf_KV system table. Keep the original export intact for local comparison.
+bash "$ROOT/infra/cloudflare/worker/scripts/prepare-d1-import.sh" \
+  "$TMP_DIR/source.db" "$TMP_DIR/neo-staging-db-d1-import.sql"
 
 cp "$ROOT/infra/cloudflare/wrangler.disposable.example.toml" "$CONFIG"
 node --input-type=module - "$CONFIG" <<'NODE'

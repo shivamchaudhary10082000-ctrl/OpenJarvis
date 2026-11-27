@@ -48,11 +48,11 @@ sqlite3 "$TMP_DIR/source.db" .dump | awk '
     line = tolower($0)
     if (!skip_cf_table && line ~ /^create table( if not exists)?[[:space:]]+["]?_cf_kv["]?([[:space:]]|[(])/) {
       skip_cf_table = 1
-      if ($0 ~ /\);[[:space:]]*$/) skip_cf_table = 0
+      if ($0 ~ /\)[[:space:]]*(WITHOUT ROWID)?;[[:space:]]*$/) skip_cf_table = 0
       next
     }
     if (skip_cf_table) {
-      if ($0 ~ /\);[[:space:]]*$/) skip_cf_table = 0
+      if ($0 ~ /\)[[:space:]]*(WITHOUT ROWID)?;[[:space:]]*$/) skip_cf_table = 0
       next
     }
     if (line ~ /^(insert into|replace into|delete from)[[:space:]]+["]?_cf_kv["]?([[:space:]]|[(])/) next

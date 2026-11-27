@@ -87,7 +87,7 @@ export function selectRecallableMemory(records:Record<string,unknown>[],includeP
   }
   const selected:Record<string,unknown>[]=[];
   for(const group of groups.values()){
-    const durable=group.filter(record=>record.trust_state==="approved"||record.trust_state==="deleted")
+    const durable=group.filter(record=>record.trust_state==="approved"||record.trust_state==="rejected"||record.trust_state==="quarantined"||record.trust_state==="deleted")
       .sort((a,b)=>Number(b.revision)-Number(a.revision));
     const latestDurable=durable[0];
     if(latestDurable?.trust_state==="approved")selected.push(latestDurable);

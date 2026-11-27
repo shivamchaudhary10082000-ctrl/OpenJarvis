@@ -134,11 +134,23 @@ jobs:
             /tmp/neo-backup-fixture/ciphertext.sha256
           retention-days: 1
           if-no-files-found: error
-      - name: Download artifact for recovery rehearsal
-        uses: actions/download-artifact@v7
-        with:
-          artifact-ids: ${{ steps.upload-rehearsal-artifact.outputs.artifact-id }}
-          path: /tmp/neo-recovery-download
+      - name: Download artifact for recovery rehearsal (retry eventual artifact indexing)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..8}; do
+            if gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "neo-d1-recovery-rehearsal-$GITHUB_RUN_ID" --dir /tmp/neo-recovery-download; then
+              test -s /tmp/neo-recovery-download/fixture.sql.age
+              test -s /tmp/neo-recovery-download/ciphertext.sha256
+              exit 0
+            fi
+            rm -rf /tmp/neo-recovery-download
+            sleep 3
+          done
+          echo "::error::Synthetic artifact was not available for download after retries."
+          exit 1
       - name: Verify checksum, detect tampering, decrypt, restore, and validate
         run: |
           set -euo pipefail

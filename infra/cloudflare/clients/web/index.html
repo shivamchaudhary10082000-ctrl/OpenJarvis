@@ -23,6 +23,11 @@
         </section>
         <section id="chat-panel" class="chat-panel" hidden>
           <div class="chat-heading"><div><div class="eyebrow">PRIVATE WORKSPACE</div><h2>Your conversation</h2></div><button id="clear-button" class="button button-quiet">New chat</button><button id="logout-button" class="button button-quiet" type="button">Sign out</button></div>
+          <section class="memory-manager" aria-labelledby="memory-title">
+            <div class="memory-manager-heading"><div><h3 id="memory-title">Memory review</h3><p>Encrypted records only · pending items need your approval</p></div><button id="memory-refresh" class="button button-outline" type="button">Refresh</button></div>
+            <div id="memory-status" class="memory-status" role="status">Memory has not been loaded.</div>
+            <div id="memory-records" class="memory-records"></div>
+          </section>
           <div id="messages" class="messages" aria-live="polite"><div class="empty-state">Your conversation starts here. Ask NEO anything.</div></div>
           <form id="chat-form" class="composer">
             <label class="sr-only" for="message-input">Message NEO</label>

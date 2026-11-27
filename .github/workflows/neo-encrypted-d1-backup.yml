@@ -25,7 +25,6 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_BACKUP_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       AGE_RECIPIENT: ${{ vars.NEO_BACKUP_AGE_RECIPIENT }}
-      GOOGLE_WEB_CLIENT_ID: ${{ vars.NEO_GOOGLE_WEB_CLIENT_ID }}
       EXPECTED_D1_ID: dd4c03d6-a286-4ac9-abbc-8f162b692acc
     steps:
       - uses: actions/checkout@v7
@@ -39,38 +38,36 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Set secret CLOUDFLARE_D1_BACKUP_TOKEN (scoped to the staging database)."; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::Missing CLOUDFLARE_ACCOUNT_ID variable."; exit 1; }
           [[ "$AGE_RECIPIENT" == age1* ]] || { echo "::error::Set NEO_BACKUP_AGE_RECIPIENT to the owner's age public key."; exit 1; }
-      - name: Install age and pinned Wrangler package
+      - name: Install age
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y -qq age
-          cd infra/cloudflare/worker
-          npm install --ignore-scripts --no-audit --no-fund
       - name: Materialize and verify disposable config
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$GOOGLE_WEB_CLIENT_ID" || { echo "::error::Missing NEO_GOOGLE_WEB_CLIENT_ID variable."; exit 1; }
-          cp infra/cloudflare/wrangler.disposable.example.toml infra/cloudflare/wrangler.disposable.toml
-          node --input-type=module <<'NODE'
-          import fs from "node:fs";
-          const p = "infra/cloudflare/wrangler.disposable.toml";
-          let c = fs.readFileSync(p, "utf8");
-          const clientId = process.env.GOOGLE_WEB_CLIENT_ID;
-          c = c.replaceAll("REPLACE-WITH-GOOGLE-WEB-CLIENT-ID", clientId);
-          for (const x of ['name = "neo-api-disposable-staging"', 'database_name = "neo-staging-db"', 'database_id = "dd4c03d6-a286-4ac9-abbc-8f162b692acc"']) {
-            if (!c.includes(x)) throw new Error("Refusing: config identity mismatch: " + x);
-          }
-          if (c.includes("REPLACE-WITH-") || c.includes("[triggers]")) throw new Error("Placeholder or trigger found");
-          if (!c.includes(`GOOGLE_WEB_CLIENT_ID = "${clientId}"`) || !c.includes(`GOOGLE_OAUTH_CLIENT_IDS = "${clientId}"`)) throw new Error("OAuth client ID replacement failed");
-          fs.writeFileSync(p,c);
-          NODE
+          cat > /tmp/neo-d1-backup.wrangler.toml <<'TOML'
+          name = "neo-d1-backup-readonly"
+          compatibility_date = "2026-11-20"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "neo-staging-db"
+          database_id = "dd4c03d6-a286-4ac9-abbc-8f162b692acc"
+          TOML
+          grep -Fqx 'database_name = "neo-staging-db"' /tmp/neo-d1-backup.wrangler.toml
+          grep -Fqx 'database_id = "dd4c03d6-a286-4ac9-abbc-8f162b692acc"' /tmp/neo-d1-backup.wrangler.toml
+          if grep -Eq 'REPLACE-WITH-|\[triggers\]|assets|workers_dev' /tmp/neo-d1-backup.wrangler.toml; then
+            echo "::error::Unexpected Worker deployment configuration in backup-only config."
+            exit 1
+          fi
+
       - name: Verify D1 identity
         working-directory: infra/cloudflare/worker
         run: |
           set -euo pipefail
-          npx wrangler d1 info neo-staging-db --json --config ../wrangler.disposable.toml >/tmp/info.json
+          npx --yes wrangler@4.157.0 d1 info neo-staging-db --json --config /tmp/neo-d1-backup.wrangler.toml >/tmp/info.json
           node --input-type=module <<'NODE'
           import fs from "node:fs";
           const data=JSON.parse(fs.readFileSync("/tmp/info.json","utf8"));
@@ -84,7 +81,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ! npx wrangler d1 export neo-staging-db --remote --output=/tmp/neo-staging-db.sql --config ../wrangler.disposable.toml >/tmp/wrangler-export.log 2>&1; then
+          if ! npx --yes wrangler@4.157.0 d1 export neo-staging-db --remote --output=/tmp/neo-staging-db.sql --config /tmp/neo-d1-backup.wrangler.toml >/tmp/wrangler-export.log 2>&1; then
             echo "::error::Export failed; CLI output withheld to prevent signed URL leakage."
             exit 1
           fi

@@ -180,8 +180,8 @@ test("memory review actions send revision preconditions to their exact endpoints
     await client.deleteMemory("approved-memory", 8);
   }, scope);
   expect(mutations).toEqual([
-    { method: "POST", path: "/memory/pending-memory/approve", revision: "4" },
-    { method: "POST", path: "/memory/pending-memory/reject", revision: "5" },
-    { method: "DELETE", path: "/memory/approved-memory", revision: "8" },
+    { method: "POST", path: "/v1/memory/pending-memory/approve", revision: "4" },
+    { method: "POST", path: "/v1/memory/pending-memory/reject", revision: "5" },
+    { method: "DELETE", path: "/v1/memory/approved-memory", revision: "8" },
   ]);
 });

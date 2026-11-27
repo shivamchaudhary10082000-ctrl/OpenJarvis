@@ -907,6 +907,65 @@ describe("D1-backed provider budgets, failover, and voice", () => {
 });
 
 describe("D1-backed encrypted memory and task concurrency", () => {
+  it("rejects malformed encrypted payload encodings before memory persistence", async () => {
+    const device = await enrolDevice("memory-invalid-" + crypto.randomUUID(), "Invalid payload device");
+    const invalid = [
+      { ...encryptedPayload({ memory_id: "bad-cipher" }), payload_ciphertext: "!" + "C".repeat(31) },
+      { ...encryptedPayload({ memory_id: "bad-nonce" }), payload_nonce: "!" + "N".repeat(15) },
+      { ...encryptedPayload({ memory_id: "bad-key" }), key_version: Number.MAX_SAFE_INTEGER + 1 },
+    ];
+    for (const payload of invalid) {
+      const response = await call(device, "/v1/memory", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload),
+      });
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({ error: { code: "invalid_memory" } });
+    }
+  });
+
+  it("isolates memory approval, revision and tombstone lifecycle by account", async () => {
+    const owner = await enrolDevice("memory-lifecycle-owner-" + crypto.randomUUID(), "Memory owner");
+    const other = await enrolDevice("memory-lifecycle-other-" + crypto.randomUUID(), "Other account");
+    const created = await call(owner, "/v1/memory", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify(encryptedPayload({ memory_id: "lifecycle-memory" })),
+    });
+    expect(created.status).toBe(201);
+    const pending = await created.json() as { revision: number };
+    const ownerPending = await call(owner, "/v1/memory?include_pending=true");
+    expect(ownerPending.status).toBe(200);
+    expect(await ownerPending.text()).toContain("lifecycle-memory");
+    const otherPending = await call(other, "/v1/memory?include_pending=true");
+    expect(otherPending.status).toBe(200);
+    expect(await otherPending.text()).not.toContain("lifecycle-memory");
+
+    const approved = await call(owner, "/v1/memory/lifecycle-memory/approve", {
+      method: "POST", headers: { "if-match": String(pending.revision) },
+    });
+    expect(approved.status).toBe(200);
+    expect(await approved.json()).toMatchObject({ revision: pending.revision + 1, trust_state: "approved" });
+
+    const staleApproval = await call(owner, "/v1/memory/lifecycle-memory/approve", {
+      method: "POST", headers: { "if-match": String(pending.revision) },
+    });
+    expect(staleApproval.status).toBe(409);
+
+    const deleted = await call(owner, "/v1/memory/lifecycle-memory", {
+      method: "DELETE", headers: { "if-match": String(pending.revision + 1) },
+    });
+    expect(deleted.status).toBe(204);
+    const tombstones = await call(owner, "/v1/memory");
+    expect(tombstones.status).toBe(200);
+    expect(await tombstones.text()).toContain("deleted");
+    const staleDelete = await call(owner, "/v1/memory/lifecycle-memory", {
+      method: "DELETE", headers: { "if-match": String(pending.revision + 1) },
+    });
+    expect(staleDelete.status).toBe(409);
+    const otherFinal = await call(other, "/v1/memory");
+    expect(otherFinal.status).toBe(200);
+    expect(await otherFinal.text()).not.toContain("lifecycle-memory");
+  });
+
   it("replays an offline memory write idempotently and rejects key reuse with changed content", async () => {
     const device = await enrolDevice("memory-idempotency-" + crypto.randomUUID(), "Memory idempotency device");
     const key = "memory-idem-" + crypto.randomUUID();

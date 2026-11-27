@@ -6,6 +6,9 @@ on:
       - neo/foundation-architecture
     paths:
       - .github/workflows/neo-d1-artifact-recovery-rehearsal.yml
+      - infra/cloudflare/worker/scripts/restore-d1-backup-to-recovery.sh
+      - infra/cloudflare/D1_STAGING_RUNBOOK.md
+      - infra/cloudflare/worker/D1_BACKUP_RECOVERY_RUNBOOK.md
 permissions:
   contents: read
   actions: read
@@ -15,6 +18,21 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      - name: Check owner-local restore script syntax and safety constants
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=infra/cloudflare/worker/scripts/restore-d1-backup-to-recovery.sh
+          bash -n "$script"
+          grep -Fq 'TARGET_ID="a426343d-7c85-4441-a46a-7b7cead38ceb"' "$script"
+          grep -Fq 'TARGET_NAME="neo-staging-recovery-test"' "$script"
+          grep -Fq 'SOURCE_ID="dd4c03d6-a286-4ac9-abbc-8f162b692acc"' "$script"
+          grep -Fq 'AGE_IDENTITY_FILE' "$script"
+          if grep -Eq 'secrets\.NEO_BACKUP_AGE_IDENTITY|R2_BUCKET|r2\.cloudflarestorage' "$script"; then
+            echo "::error::Owner-local restore script must not require GitHub-held private keys or R2."
+            exit 1
+          fi
+          echo "Restore script syntax and hard-coded source/target safety checks passed."
       - name: Install age and SQLite
         run: |
           set -euo pipefail

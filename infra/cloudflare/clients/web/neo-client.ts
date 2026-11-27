@@ -227,6 +227,23 @@ export class NeoDeviceClient {
     if(payload.next_cursor)await saveCursor(payload.next_cursor,this.scopeKey);
     return {...payload,offline:false};
   }
+  async listMemoryForManagement(){
+    const records:Record<string,unknown>[]=[];
+    let cursor:string|null=null;
+    for(let page=0;page<1000;page++){
+      const q=new URLSearchParams({include_pending:"true"});
+      if(cursor)q.set("cursor",cursor);
+      const response=await this.request("/memory?"+q.toString());
+      if(!response.ok)throw new Error("Memory listing failed: "+response.status);
+      const payload=await response.json() as {records?:Record<string,unknown>[];next_cursor?:string|null};
+      const batch=payload.records||[];
+      records.push(...batch);
+      await cacheMemory(batch,this.scopeKey);
+      cursor=payload.next_cursor||null;
+      if(!cursor)return records;
+    }
+    throw new Error("Memory listing exceeded the safe pagination limit");
+  }
   async getCachedMemory(includePending=false){return readCachedMemory(includePending,this.scopeKey);}
   async createMemory(input:{memory_id:string;payload_ciphertext:string;payload_nonce:string;key_version:number;source_kind?:string}){
     const key=randomId(),body=JSON.stringify({memory_id:input.memory_id,payload_ciphertext:input.payload_ciphertext,payload_nonce:input.payload_nonce,key_version:input.key_version,...(input.source_kind===undefined?{}:{source_kind:input.source_kind})});

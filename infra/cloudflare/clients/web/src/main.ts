@@ -64,7 +64,14 @@ async function refreshMemoryManagement() {
   memoryStatus.textContent = "Loading encrypted memory records…";
   memoryRecordsNode.replaceChildren();
   try {
-    const records = await client.listMemoryForManagement();
+    const allRecords = await client.listMemoryForManagement();
+    const latestById = new Map<string, Record<string, unknown>>();
+    for (const record of allRecords) {
+      if (typeof record.memory_id !== "string" || typeof record.revision !== "number") continue;
+      const previous = latestById.get(record.memory_id);
+      if (!previous || Number(previous.revision) < record.revision) latestById.set(record.memory_id, record);
+    }
+    const records = [...latestById.values()].sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0));
     if (!records.length) {
       memoryStatus.textContent = "No cloud memory records found.";
       return;

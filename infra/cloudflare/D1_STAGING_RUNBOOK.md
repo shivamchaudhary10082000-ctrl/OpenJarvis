@@ -78,34 +78,32 @@ NODE
 
 ## Encrypted backup and isolated recovery (no R2 dependency)
 
-The recovery path uses GitHub Actions artifacts; it does not require an R2 bucket.
+The recovery path uses a time-limited encrypted GitHub Actions artifact. It does not require R2, an R2 bucket, or an age private key in GitHub.
 
 - Source: `neo-staging-db` (`dd4c03d6-a286-4ac9-abbc-8f162b692acc`).
 - Restore target: `neo-staging-recovery-test` (`a426343d-7c85-4441-a46a-7b7cead38ceb`).
 - Backup workflow: `.github/workflows/neo-encrypted-d1-backup.yml`.
-- Restore workflow: `.github/workflows/neo-d1-isolated-recovery-restore.yml`.
+- Owner-local restore script: `infra/cloudflare/worker/scripts/restore-d1-backup-to-recovery.sh`.
 
-The backup workflow exports the source database, encrypts the SQL with the configured age public recipient before upload, and stores only ciphertext, SHA-256 and non-sensitive metadata in a time-limited GitHub Actions artifact. The restore workflow checks that the selected run is a successful manual run of the exact backup workflow on `neo/foundation-architecture`, verifies the artifact checksum and source UUID, decrypts only on an ephemeral runner, and refuses to import unless the recovery database UUID matches and the target has zero user tables. It imports only into the hard-coded recovery target; it contains no staging migration command.
+The backup workflow verifies the source UUID, exports SQL on an ephemeral runner, encrypts it with the owner's public age recipient before upload, and uploads only ciphertext, SHA-256 and non-sensitive metadata as a GitHub Actions artifact. The age private identity remains on the owner's device. It is never stored in GitHub, the repository, or chat.
 
-Required GitHub configuration for this path:
+Required GitHub configuration for the backup-only workflow:
 
-1. `CLOUDFLARE_D1_BACKUP_TOKEN`: backup/export permission restricted to the source staging D1 resource.
-2. `NEO_BACKUP_AGE_RECIPIENT`: the owner's age public recipient (not a secret).
-3. `NEO_BACKUP_AGE_IDENTITY`: the matching age private identity, stored only as a GitHub Actions secret. Never commit it or paste it into chat.
-4. `CLOUDFLARE_D1_RECOVERY_TOKEN`: D1 write permission restricted to the single recovery database resource.
-5. Existing `CLOUDFLARE_ACCOUNT_ID` variable.
+1. `CLOUDFLARE_D1_BACKUP_TOKEN`: D1 export/write permission restricted to the source staging database resource. Export may require D1 Write according to the Wrangler/Cloudflare permission model; do not use an account-wide token.
+2. `NEO_BACKUP_AGE_RECIPIENT`: the owner's age public recipient, stored as a repository variable.
+3. Existing `CLOUDFLARE_ACCOUNT_ID` variable.
 
-Do not reuse an account-wide token. If Cloudflare cannot scope the recovery token to the recovery database resource, do not run the restore workflow.
+The owner-local restore script additionally requires a separate `CLOUDFLARE_API_TOKEN` with D1 write permission scoped only to the recovery database, plus the local `AGE_IDENTITY_FILE` path. Do not reuse the Worker deployment token or a broad account-wide D1 token. The private identity must remain in private local storage with restrictive file permissions.
 
 Execution order:
 
-1. On `neo/foundation-architecture`, manually dispatch **NEO encrypted disposable D1 backup** with `confirm_backup=true`. This is a read-only export of staging; it does not apply migrations.
-2. Confirm the run succeeds and note its run ID.
-3. Manually dispatch **NEO encrypted D1 backup restore to isolated recovery database**, enter that backup run ID, and set `confirm_restore=true`.
-4. Inspect the job summary and logs. A successful run must prove artifact provenance, checksum, age decryption, local SQLite integrity, exact remote recovery UUID, empty-target precondition, remote import, remote integrity check and no foreign-key violations.
-5. Compare the restored schema/data and migration tracking with the source export before considering the staging migration gate. A successful import alone does not authorize staging migration.
+1. On `neo/foundation-architecture`, manually dispatch **NEO encrypted disposable D1 backup** with `confirm_backup=true`. This exports staging and does not apply migrations.
+2. Confirm the run succeeds. Download the artifact named `neo-staging-d1-encrypted-backup-<run-id>` from that exact run and extract it on the owner's Android device.
+3. Run the owner-local restore script from the checked-out repository, passing the extracted artifact directory. It verifies the ciphertext checksum and source UUID, decrypts locally using the owner-held identity, validates the SQL in local SQLite, checks the exact remote recovery UUID and empty-target precondition, imports only into the recovery database, compares schema definitions and every table's row content with the decrypted source, then runs remote integrity and foreign-key checks.
+4. Preserve the run ID, backup checksum and script output as the recovery evidence. A successful local restore is required before staging migration can be considered.
+5. Do not change `D1_MIGRATION_APPROVAL.txt` from `NO` until the separate migration authorization gate is reviewed again.
 
-GitHub Actions artifacts are retained for 30 days by the backup workflow. They are encrypted before upload, but artifact availability is not permanent. The owner-held private age identity remains a critical recovery dependency.
+The backup artifact is retained for 30 days. It is encrypted before upload, but artifact availability is not permanent. The owner-held private age identity remains the recovery root of trust.
 
 ## Mobile-friendly migration workflow
 

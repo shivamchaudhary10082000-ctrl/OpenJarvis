@@ -66,11 +66,13 @@ jobs:
           sha256sum -c ciphertext.sha256
           cp fixture.sql.age tampered.sql.age
           printf 'tamper' >> tampered.sql.age
-          if sha256sum tampered.sql.age | awk '{print $1}' | grep -qx "$(awk '{print $1}' ciphertext.sha256)"; then
-            echo "::error::Tampered ciphertext incorrectly matched checksum."
+          cp ciphertext.sha256 tampered.sha256
+          sed -i 's/fixture.sql.age/tampered.sql.age/' tampered.sha256
+          if sha256sum -c tampered.sha256; then
+            echo "::error::Tampered ciphertext passed checksum verification."
             exit 1
           fi
-          rm tampered.sql.age
+          rm tampered.sql.age tampered.sha256
           age -d -i /tmp/neo-backup-fixture/test-key.txt -o restored.sql fixture.sql.age
           test -s restored.sql
           sqlite3 restored.db < restored.sql

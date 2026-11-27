@@ -32,7 +32,6 @@ jobs:
       AGE_IDENTITY: ${{ secrets.NEO_BACKUP_AGE_IDENTITY }}
       EXPECTED_SOURCE_D1_ID: dd4c03d6-a286-4ac9-abbc-8f162b692acc
       EXPECTED_TARGET_D1_ID: a426343d-7c85-4441-a46a-7b7cead38ceb
-      EXPECTED_TARGET_NAME: neo-staging-recovery-test
       BACKUP_RUN_ID: ${{ inputs.backup_run_id }}
     steps:
       - uses: actions/checkout@v7
@@ -152,7 +151,7 @@ jobs:
           set -euo pipefail
           npx wrangler d1 execute neo-staging-recovery-test --remote --config ../wrangler.recovery.toml --file=/tmp/neo-staging-db.sql >/tmp/recovery-import.log 2>&1 || { echo "::error::Import failed; Wrangler output withheld."; exit 1; }
           echo "Encrypted backup SQL imported into the separately identified recovery database."
-      - name: Verify restored database integrity and migration metadata
+      - name: Verify restored database integrity
         working-directory: infra/cloudflare/worker
         shell: bash
         run: |
@@ -181,5 +180,5 @@ jobs:
         if: always()
         shell: bash
         run: |
-          rm -f /tmp/neo-staging-db.sql /tmp/neo-backup-verify.db /tmp/neo-backup-age-identity.txt /tmp/recovery-info.json /tmp/recovery-info.log /tmp/recovery-empty-check.json /tmp/recovery-empty-check.log /tmp/recovery-import.log /tmp/recovery-integrity.json /tmp/recovery-integrity.log /tmp/recovery-fk.json /tmp/recovery-fk.log /tmp/source-table-count
+          rm -f /tmp/neo-staging-db.sql /tmp/neo-backup-verify.db /tmp/neo-backup-age-identity.txt /tmp/backup-run.json /tmp/recovery-info.json /tmp/recovery-info.log /tmp/recovery-empty-check.json /tmp/recovery-empty-check.log /tmp/recovery-import.log /tmp/recovery-integrity.json /tmp/recovery-integrity.log /tmp/recovery-fk.json /tmp/recovery-fk.log /tmp/source-table-count
           rm -rf /tmp/neo-d1-backup

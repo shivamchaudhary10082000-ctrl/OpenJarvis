@@ -94,6 +94,11 @@ jobs:
                   db.execute("UPDATE provider_spend_reservations SET state='released',settled_at=6 WHERE reservation_id='ledger-res-2'")
                   usage = db.execute("SELECT reserved_microusd,spent_microusd,reserved_input_tokens,reserved_output_tokens,input_tokens,output_tokens FROM provider_spend_usage WHERE account_id='migration-ledger-test'").fetchone()
                   assert usage == (0,300,0,0,30,30), f"Release accounting mismatch: {usage}"
+                  try:
+                      db.execute("UPDATE provider_spend_reservations SET state='settled' WHERE reservation_id='ledger-res-2'")
+                      raise AssertionError("Released reservation was unexpectedly resurrected")
+                  except sqlite3.IntegrityError as exc:
+                      assert "terminal_immutable" in str(exc), f"Unexpected release mutation failure: {exc}"
                   print("PASS provider reservation, over-budget rejection, settlement, immutable settled reservation, and release accounting")
               finally:
                   db.close()

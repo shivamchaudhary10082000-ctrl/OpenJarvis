@@ -645,6 +645,16 @@ async function route(req: Request, env: Env): Promise<Response> {
       await env.DB.prepare("INSERT INTO audit_events(event_id,account_id,device_id,event_type,event_metadata_json,created_at) VALUES(?,?,?,?,?,?)").bind(id(),account,device.device_id,"memory.approved",JSON.stringify({memory_id:approve[1],revision:expected+1}),t).run();
       return json({memory_id:approve[1],revision:expected+1,trust_state:"approved",updated_at:t});
     }
+    const reject = path.match(/^\/memory\/([A-Za-z0-9_-]{1,128})\/reject$/);
+    if (reject && req.method === "POST") {
+      const expected=Number((req.headers.get("if-match")||"").replaceAll('"',""));
+      if (!Number.isInteger(expected) || expected < 1) return fail(428,"precondition_required","If-Match revision is required");
+      const t=now();
+      const r=await env.DB.prepare("INSERT INTO memory_records(memory_id,revision,account_id,trust_state,payload_ciphertext,payload_nonce,key_version,source_device_id,source_kind,created_at,updated_at) SELECT memory_id, revision+1, account_id, 'quarantined', payload_ciphertext, payload_nonce, key_version, source_device_id, source_kind, created_at, ? FROM memory_records WHERE account_id=? AND memory_id=? AND revision=? AND trust_state='pending' AND NOT EXISTS (SELECT 1 FROM memory_records newer WHERE newer.account_id=? AND newer.memory_id=? AND newer.revision=?)").bind(t,account,reject[1],expected,account,reject[1],expected+1).run();
+      if (!r.meta.changes) return fail(409,"revision_conflict","Memory is not pending at the expected revision");
+      await env.DB.prepare("INSERT INTO audit_events(event_id,account_id,device_id,event_type,event_metadata_json,created_at) VALUES(?,?,?,?,?,?)").bind(id(),account,device.device_id,"memory.rejected",JSON.stringify({memory_id:reject[1],revision:expected+1}),t).run();
+      return json({memory_id:reject[1],revision:expected+1,trust_state:"quarantined",updated_at:t});
+    }
     const remove = path.match(/^\/memory\/([A-Za-z0-9_-]{1,128})$/);
     if (remove && req.method === "DELETE") {
       const expected=Number((req.headers.get("if-match")||"").replaceAll('"',""));

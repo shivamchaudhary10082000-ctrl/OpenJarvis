@@ -37,6 +37,7 @@ jobs:
           grep -Fq 'BACKUP_ATTEMPT' "$script"
           grep -Fq 'BACKUP_CREATED_UTC' "$script"
           grep -Fq 'BACKUP_SHA256' "$script"
+          grep -Fq 'spawnSync("npx",["--yes","wrangler@4.157.0"' "$script"
           grep -Fq 'expected encrypted backup file' "$script"
           if grep -Eq 'secrets\.NEO_BACKUP_AGE_IDENTITY|R2_BUCKET|r2\.cloudflarestorage' "$script"; then
             echo "::error::Owner-local restore script must not require GitHub-held private keys or R2."

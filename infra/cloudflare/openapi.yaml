@@ -332,6 +332,32 @@ paths:
                 $ref: "#/components/schemas/MemoryRecord"
         "409":
           $ref: "#/components/responses/Conflict"
+  /memory/{memoryId}/reject:
+    post:
+      operationId: rejectMemory
+      summary: Explicitly reject a pending memory candidate
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: memoryId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: If-Match
+          in: header
+          required: true
+          description: Expected current revision; stale rejections are rejected.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Memory marked rejected and excluded from recall
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryRecord"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /memory/{memoryId}:
     delete:
       operationId: tombstoneMemory

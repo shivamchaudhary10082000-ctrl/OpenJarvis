@@ -27,7 +27,7 @@ WORKER_DIR="$ROOT/infra/cloudflare/worker"
 CONFIG="$ROOT/infra/cloudflare/wrangler.recovery.local.toml"
 TMP_DIR="$(mktemp -d)"
 cleanup() {
-  rm -f "$CONFIG" "$TMP_DIR/neo-staging-db.sql" "$TMP_DIR/source.db"
+  rm -f "$CONFIG" "$TMP_DIR/neo-staging-db.sql" "$TMP_DIR/neo-staging-db-d1-import.sql" "$TMP_DIR/source.db"
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
@@ -38,6 +38,15 @@ test -s "$TMP_DIR/neo-staging-db.sql" || fail "Decrypted SQL is empty."
 sqlite3 "$TMP_DIR/source.db" < "$TMP_DIR/neo-staging-db.sql"
 [[ "$(sqlite3 "$TMP_DIR/source.db" 'PRAGMA integrity_check;')" == "ok" ]] || fail "Local source integrity check failed."
 [[ -z "$(sqlite3 "$TMP_DIR/source.db" 'PRAGMA foreign_key_check;')" ]] || fail "Local source has foreign-key violations."
+
+# D1's import path does not accept SQLite transaction wrappers. Keep the original
+# export intact for local comparison and create a D1-compatible import copy.
+sed -E '/^[[:space:]]*(BEGIN TRANSACTION|COMMIT);?[[:space:]]*$/Id' \
+  "$TMP_DIR/neo-staging-db.sql" > "$TMP_DIR/neo-staging-db-d1-import.sql"
+test -s "$TMP_DIR/neo-staging-db-d1-import.sql" || fail "D1-compatible import SQL is empty."
+if grep -Eiq 'CREATE TABLE[[:space:]]+_cf_KV' "$TMP_DIR/neo-staging-db-d1-import.sql"; then
+  fail "Export includes Cloudflare's reserved _cf_KV table; refusing to import a reserved system table."
+fi
 
 cp "$ROOT/infra/cloudflare/wrangler.disposable.example.toml" "$CONFIG"
 node --input-type=module - "$CONFIG" <<'NODE'
@@ -76,7 +85,7 @@ if(vals.length!==1||vals[0]!==0)throw new Error("Recovery D1 is not provably emp
 NODE
 
 echo "Preflight passed: source backup verified; remote target UUID matches and is empty."
-npx wrangler d1 execute "$TARGET_NAME" --remote --config "$CONFIG" --file="$TMP_DIR/neo-staging-db.sql"
+npx wrangler d1 execute "$TARGET_NAME" --remote --config "$CONFIG" --file="$TMP_DIR/neo-staging-db-d1-import.sql"
 echo "SQL import completed. Comparing restored schema and every table's records against the decrypted source backup..."
 
 node --input-type=module - "$TMP_DIR/source.db" "$TARGET_NAME" "$CONFIG" <<'NODE'

@@ -411,9 +411,12 @@ export function isValidCapabilityList(value: unknown): value is string[] {
     new Set(value).size === value.length;
 }
 function validCipher(x: any): boolean {
-  return typeof x?.payload_ciphertext === "string" && x.payload_ciphertext.length >= 16 &&
-    typeof x?.payload_nonce === "string" && x.payload_nonce.length >= 12 &&
-    Number.isInteger(x?.key_version) && x.key_version > 0;
+  // Encrypted payloads are opaque base64url bytes. Reject malformed encodings and
+  // oversized fields before conversion or persistence to avoid decoder ambiguity.
+  return typeof x?.payload_ciphertext === "string" &&
+    /^[A-Za-z0-9_-]{16,7000000}$/.test(x.payload_ciphertext) &&
+    typeof x?.payload_nonce === "string" && /^[A-Za-z0-9_-]{12,128}$/.test(x.payload_nonce) &&
+    Number.isSafeInteger(x?.key_version) && x.key_version > 0;
 }
 async function route(req: Request, env: Env): Promise<Response> {
   const url = new URL(req.url);

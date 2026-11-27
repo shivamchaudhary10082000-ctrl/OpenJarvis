@@ -46,7 +46,7 @@ sqlite3 "$TMP_DIR/source.db" .dump | awk '
   BEGIN { skip_cf_table = 0 }
   {
     line = tolower($0)
-    if (!skip_cf_table && line ~ /^create table( if not exists)?[[:space:]]+["\x60]?_cf_kv["\x60]?([[:space:]]|[(])/) {
+    if (!skip_cf_table && line ~ /^create table( if not exists)?[[:space:]]+["]?_cf_kv["]?([[:space:]]|[(])/) {
       skip_cf_table = 1
       if ($0 ~ /\);[[:space:]]*$/) skip_cf_table = 0
       next
@@ -55,7 +55,7 @@ sqlite3 "$TMP_DIR/source.db" .dump | awk '
       if ($0 ~ /\);[[:space:]]*$/) skip_cf_table = 0
       next
     }
-    if (line ~ /^(insert into|replace into|delete from)[[:space:]]+["\x60]?_cf_kv["\x60]?([[:space:]]|[(])/) next
+    if (line ~ /^(insert into|replace into|delete from)[[:space:]]+["]?_cf_kv["]?([[:space:]]|[(])/) next
     if (line ~ /^[[:space:]]*(begin transaction|commit);?[[:space:]]*$/) next
     if (line ~ /^[[:space:]]*pragma foreign_keys[[:space:]]*=/) next
     print

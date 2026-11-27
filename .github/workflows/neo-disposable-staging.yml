@@ -284,6 +284,7 @@ jobs:
           if(r.path!==".github/workflows/neo-encrypted-d1-backup.yml")throw new Error("Restore attestation references a run that is not the encrypted D1 backup workflow");
           if(r.conclusion!=="success"||r.status!=="completed")throw new Error("Referenced encrypted backup run did not succeed");
           if(r.head_branch!=="neo/foundation-architecture"||r.event!=="workflow_dispatch")throw new Error("Referenced backup run was not manually dispatched from the engineering branch");
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, "backup_commit="+r.head_sha+"\\nbackup_attempt="+r.run_attempt+"\\n");
           NODE
 
       - name: Download the exact backup artifact cited by restore attestation
@@ -301,6 +302,8 @@ jobs:
         shell: bash
         env:
           EXPECTED_BACKUP_SHA256: ${{ steps.restore_attestation.outputs.backup_sha256 }}
+          EXPECTED_BACKUP_COMMIT: ${{ steps.restore_attestation.outputs.backup_commit }}
+          EXPECTED_BACKUP_ATTEMPT: ${{ steps.restore_attestation.outputs.backup_attempt }}
         run: |
           set -euo pipefail
           cd /tmp/neo-staging-restore-attestation
@@ -312,6 +315,8 @@ jobs:
           test "$actual" = "$EXPECTED_BACKUP_SHA256" || { echo "::error::Backup artifact SHA-256 does not match restore attestation."; exit 1; }
           grep -Fqx "Database UUID: $EXPECTED_D1_ID" backup-manifest.txt || { echo "::error::Backup source UUID mismatch."; exit 1; }
           grep -Fqx "Run ID: ${{ steps.restore_attestation.outputs.backup_run_id }}" backup-manifest.txt || { echo "::error::Backup run ID mismatch."; exit 1; }
+          grep -Fqx "Commit: $EXPECTED_BACKUP_COMMIT" backup-manifest.txt || { echo "::error::Backup commit does not match the GitHub workflow run head."; exit 1; }
+          grep -Fqx "Run attempt: $EXPECTED_BACKUP_ATTEMPT" backup-manifest.txt || { echo "::error::Backup run attempt does not match the referenced workflow run."; exit 1; }
           echo "ready=true" >> "$GITHUB_OUTPUT"
           {
             echo "### Owner-local restore attestation verified"

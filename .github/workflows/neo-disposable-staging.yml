@@ -351,6 +351,11 @@ jobs:
           done
           echo "### D1 migrations applied and critical schema verified" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Cleanup ephemeral D1 export and verification files
+        if: always()
+        run: |
+          rm -f /tmp/neo-staging-pre-migration.sql /tmp/neo-d1-export.log /tmp/neo-d1-info.json /tmp/neo-d1-bookmark.json /tmp/neo-d1-schema.json /tmp/neo-d1-triggers.json /tmp/neo-d1-session-indexes.json
+
       - name: Cleanup backup attestation download
         if: always()
         run: rm -rf /tmp/neo-staging-restore-attestation /tmp/neo-backup-run.json

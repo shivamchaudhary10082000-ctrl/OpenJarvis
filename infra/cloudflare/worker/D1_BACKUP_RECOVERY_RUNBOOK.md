@@ -1,6 +1,6 @@
 # NEO disposable D1 backup and recovery runbook
 
-Status as of 2026-11-27: **real staging backup and restore are blocked; no NEO migrations have been applied to the remote database.**
+Status as of 2026-11-28: **real staging backup and restore are blocked; no NEO migrations have been applied to the remote database.**
 
 ## Scope and protected resources
 
@@ -16,23 +16,23 @@ Workflow run [#45910522233](https://github.com/shivamchaudhary10082000-ctrl/Open
 1. Confirmed the D1 UUID matches the hard-coded disposable target.
 2. Retrieved a D1 Time Travel bookmark.
 3. Exported SQL to the ephemeral runner; Wrangler output was redirected so its short-lived signed download URL was not written to public logs.
-4. Inspected the remote migration list: **migrations 0001–0011 are pending**.
+4. Inspected the remote migration list: **migrations 0001–0012 are pending**.
 5. Skipped encrypted artifact backup and all schema writes. No remote migration was applied.
-6. `infra/cloudflare/D1_MIGRATION_APPROVAL.txt` is `NO`.
+6. `infra/cloudflare/D1_MIGRATION_APPROVAL.txt` was `NO`.
 
-The export was temporary runner data, not a durable backup. A Time Travel bookmark is not a substitute for the required encrypted, independently recoverable backup.
+Migration 0012 was added after that preflight. The remote migration list has not been rechecked against the current 12-file chain; do not assume a current pending count until a fresh read-only preflight. The export was temporary runner data, not a durable backup. A Time Travel bookmark is not a substitute for the required encrypted, independently recoverable backup.
 
 ## Migration gate behavior
 
 The current `.github/workflows/neo-disposable-staging.yml` keeps migration apply separate from backup and restore:
 
 - `PREFLIGHT_ONLY` verifies the source UUID, records a Time Travel bookmark, exports SQL only to ephemeral runner storage, and lists migration state. It does not change schema.
-- `APPLY_0001_0011` is rejected unless `D1_RESTORE_ATTESTATION.txt` explicitly records `RESTORE_VERIFIED=YES` with the exact source and recovery UUIDs.
+- `APPLY_0001_0012` is rejected unless `D1_RESTORE_ATTESTATION.txt` explicitly records `RESTORE_VERIFIED=YES` with the exact source and recovery UUIDs.
 - Before applying, the workflow checks the attested backup run is a successful manual run of the exact backup workflow on `neo/foundation-architecture`, downloads the referenced encrypted artifact, and verifies its checksum, source UUID and run ID against the attestation.
 - The owner-held age private identity is never placed in GitHub. The local restore script must have completed schema and record comparison, integrity checks and foreign-key validation before the owner records the attestation.
 - Both `D1_MIGRATION_APPROVAL.txt` and `D1_RESTORE_ATTESTATION.txt` remain `NO` by default. No migration is authorized by a successful backup alone.
 
-Do not set `APPLY_0001_0011` merely to obtain a backup. Use the separate encrypted backup-only workflow and owner-local restore process first.
+Do not set `APPLY_0001_0012` merely to obtain a backup. Use the separate encrypted backup-only workflow and owner-local restore process first.
 
 ## Credentials and artifact storage status
 
@@ -51,7 +51,7 @@ Do not set `APPLY_0001_0011` merely to obtain a backup. Use the separate encrypt
 5. Run `infra/cloudflare/worker/scripts/restore-d1-backup-to-recovery.sh` locally. The script checks the source UUID, local SQLite integrity, exact recovery D1 UUID and empty-target precondition; it restores only to the recovery database; then compares schema definitions and all table row contents with the decrypted source and checks remote integrity and foreign keys.
 6. Retain the exact backup run ID, SHA-256 and successful restore output as evidence.
 7. Only after restore evidence is reviewed may the already-authorized disposable-source migration sequence be considered. The current apply workflow now requires a restore attestation tied to the exact backup run ID, ciphertext SHA-256 and source/recovery UUIDs, and revalidates the referenced artifact before applying.
-8. Verify all 11 migration-history entries; all expected tables, indexes and triggers; expected foreign-key relationships; and zero foreign-key violations. Do not enable scheduled maintenance until verification is complete.
+8. Verify all 12 migration-history entries; all expected tables, indexes and triggers; expected foreign-key relationships; and zero foreign-key violations. Do not enable scheduled maintenance until verification is complete.
 
 ## Synthetic artifact rehearsal is not staging recovery
 

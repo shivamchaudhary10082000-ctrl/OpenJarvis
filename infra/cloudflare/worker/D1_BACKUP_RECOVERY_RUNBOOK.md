@@ -16,7 +16,7 @@ Workflow run [#45910522233](https://github.com/shivamchaudhary10082000-ctrl/Open
 1. Confirmed the D1 UUID matches the hard-coded disposable target.
 2. Retrieved a D1 Time Travel bookmark.
 3. Exported SQL to the ephemeral runner; Wrangler output was redirected so its short-lived signed download URL was not written to public logs.
-4. Inspected the remote migration list: **migrations 0001–0012 are pending**.
+4. Inspected the remote migration list at that time: **migrations 0001–0011 were pending**.
 5. Skipped encrypted artifact backup and all schema writes. No remote migration was applied.
 6. `infra/cloudflare/D1_MIGRATION_APPROVAL.txt` was `NO`.
 

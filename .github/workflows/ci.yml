@@ -189,6 +189,25 @@ jobs:
         shell: bash
         run: uv run pytest tests/cli/test_digest_cmd.py tests/speech/test_voice_io.py -q
 
+
+  neo-worker:
+    name: NEO Cloudflare Worker and web client
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/cloudflare/worker
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: infra/cloudflare/worker/package.json
+      - run: npm install --ignore-scripts
+      - run: npm audit --audit-level=moderate
+      - run: npm run check
+      - run: npm test
+
   rust:
     runs-on: ubuntu-latest
     defaults:

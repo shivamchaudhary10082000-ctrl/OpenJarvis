@@ -1,0 +1,372 @@
+name: NEO disposable staging deployment
+
+on:
+  # Allow an explicitly tagged commit on the isolated engineering branch to
+  # perform the first disposable deployment before this workflow reaches main.
+  # Ordinary pushes never deploy; the job also requires the marker below.
+  push:
+    branches:
+      - neo/foundation-architecture
+    paths:
+      - ".github/workflows/neo-disposable-staging.yml"
+      - "infra/cloudflare/**"
+  workflow_dispatch:
+    inputs:
+      confirm_disposable_staging:
+        description: "I confirm this workflow may deploy only neo-api-disposable-staging. It must not run D1 migrations."
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: neo-disposable-staging-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-disposable-staging:
+    if: |
+      (github.event_name == 'workflow_dispatch' && inputs.confirm_disposable_staging == true) ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[neo-staging-deploy]') && !contains(github.event.head_commit.message, '[neo-d1-preflight]') && !contains(github.event.head_commit.message, '[neo-d1-apply]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      NEO_GOOGLE_WEB_CLIENT_ID: ${{ vars.NEO_GOOGLE_WEB_CLIENT_ID }}
+      CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ vars.CLOUDFLARE_WORKERS_SUBDOMAIN }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Validate deployment credentials and identity configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Add CLOUDFLARE_API_TOKEN as a GitHub Actions secret."; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::Add CLOUDFLARE_ACCOUNT_ID as a GitHub Actions variable."; exit 1; }
+          test -n "$NEO_GOOGLE_WEB_CLIENT_ID" || { echo "::error::Add NEO_GOOGLE_WEB_CLIENT_ID as a GitHub Actions variable."; exit 1; }
+          test -n "$CLOUDFLARE_WORKERS_SUBDOMAIN" || { echo "::error::Add CLOUDFLARE_WORKERS_SUBDOMAIN as a GitHub Actions variable."; exit 1; }
+          [[ "$NEO_GOOGLE_WEB_CLIENT_ID" == *.apps.googleusercontent.com ]] || { echo "::error::The Google Web OAuth client ID format is invalid."; exit 1; }
+
+      - name: Build browser Alpha assets
+        working-directory: infra/cloudflare/clients/web
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Install pinned Wrangler from the NEO Worker package
+        working-directory: infra/cloudflare/worker
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Materialize disposable staging config
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp infra/cloudflare/wrangler.disposable.example.toml infra/cloudflare/wrangler.disposable.toml
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          const path = "infra/cloudflare/wrangler.disposable.toml";
+          const clientId = process.env.NEO_GOOGLE_WEB_CLIENT_ID;
+          let config = fs.readFileSync(path, "utf8");
+          config = config.replaceAll("REPLACE-WITH-GOOGLE-WEB-CLIENT-ID", clientId);
+          if (config.includes("REPLACE-WITH-")) throw new Error("Staging config still contains an unresolved placeholder");
+          if (!config.includes('database_name = "neo-staging-db"') ||
+              !config.includes('database_id = "dd4c03d6-a286-4ac9-abbc-8f162b692acc"') ||
+              !config.includes('name = "neo-api-disposable-staging"')) {
+            throw new Error("Refusing to deploy: disposable NEO resource identity does not match the approved staging target");
+          }
+          fs.writeFileSync(path, config);
+          NODE
+
+      - name: Deploy NEO Worker and browser assets to disposable staging
+        working-directory: infra/cloudflare/worker
+        run: npx wrangler deploy --config ../wrangler.disposable.toml
+
+      - name: Verify staging health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://neo-api-disposable-staging.${{ vars.CLOUDFLARE_WORKERS_SUBDOMAIN }}.workers.dev/v1/health"
+          for attempt in {1..12}; do
+            if curl --fail --silent --show-error "$url"; then
+              echo
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::NEO staging health check did not become ready."
+          exit 1
+
+  migrate-disposable-d1:
+    if: |
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/neo/foundation-architecture' &&
+      (contains(github.event.head_commit.message, '[neo-d1-preflight]') || contains(github.event.head_commit.message, '[neo-d1-apply]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_MIGRATION_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      NEO_GOOGLE_WEB_CLIENT_ID: ${{ vars.NEO_GOOGLE_WEB_CLIENT_ID }}
+      EXPECTED_D1_ID: dd4c03d6-a286-4ac9-abbc-8f162b692acc
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - id: approval
+        name: Validate explicit preflight or apply approval
+        shell: bash
+        run: |
+          set -euo pipefail
+          approval="$(tr -d '[:space:]' < infra/cloudflare/D1_MIGRATION_APPROVAL.txt)"
+          message="$(git log -1 --pretty=%B)"
+          if [[ "$approval" == "PREFLIGHT_ONLY" && "$message" == *"[neo-d1-preflight]"* ]]; then
+            echo "apply=false" >> "$GITHUB_OUTPUT"
+            echo "Preflight-only mode selected; no schema writes will run."
+          elif [[ "$approval" == "APPLY_0001_0012" && "$message" == *"[neo-d1-apply]"* ]]; then
+            echo "apply=true" >> "$GITHUB_OUTPUT"
+            echo "Explicit approval recorded for migrations 0001–0012 on disposable D1."
+          else
+            echo "::error::Approval file and commit message do not match an allowed action. Use PREFLIGHT_ONLY with [neo-d1-preflight], or APPLY_0001_0012 with [neo-d1-apply]."
+            exit 1
+          fi
+          if [[ "$approval" == "APPLY_0001_0012" ]]; then
+            test -f infra/cloudflare/D1_RESTORE_ATTESTATION.txt || { echo "::error::Missing restore attestation file."; exit 1; }
+            grep -Fqx "RESTORE_VERIFIED=YES" infra/cloudflare/D1_RESTORE_ATTESTATION.txt || { echo "::error::Owner-local recovery restore is not attested."; exit 1; }
+            grep -Fqx "SOURCE_D1_UUID=dd4c03d6-a286-4ac9-abbc-8f162b692acc" infra/cloudflare/D1_RESTORE_ATTESTATION.txt || { echo "::error::Restore attestation source UUID mismatch."; exit 1; }
+            grep -Fqx "RECOVERY_D1_UUID=a426343d-7c85-4441-a46a-7b7cead38ceb" infra/cloudflare/D1_RESTORE_ATTESTATION.txt || { echo "::error::Restore attestation recovery UUID mismatch."; exit 1; }
+          fi
+
+      - name: Validate credentials and exact migration set
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || {
+            echo "::error::Add CLOUDFLARE_D1_MIGRATION_TOKEN as a separate GitHub Actions secret. It must be Developer Platform Editor scoped only to neo-staging-db."; exit 1;
+          }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || {
+            echo "::error::CLOUDFLARE_ACCOUNT_ID repository variable is missing."; exit 1;
+          }
+          test -n "$NEO_GOOGLE_WEB_CLIENT_ID" || {
+            echo "::error::NEO_GOOGLE_WEB_CLIENT_ID repository variable is missing."; exit 1;
+          }
+          actual="$(find infra/cloudflare/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort)"
+          expected="$(cat <<'EOF'
+          0001_neo_core.sql
+          0002_device_request_nonces.sql
+          0003_task_capabilities.sql
+          0004_api_rate_limits.sql
+          0005_provider_spend_limits.sql
+          0006_provider_spend_settlement_guard.sql
+          0007_offline_idempotency.sql
+          0008_provider_token_budgets.sql
+          0009_enforce_settled_token_budgets.sql
+          0010_oidc_login_challenges.sql
+          0011_browser_sessions.sql
+          0012_immutable_terminal_provider_reservations.sql
+          EOF
+          )"
+          test "$actual" = "$expected" || {
+            echo "::error::The checked-in migration set differs from the reviewed 0001–0012 set. Stop and review."; exit 1;
+          }
+
+      - name: Install pinned Wrangler
+        working-directory: infra/cloudflare/worker
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Materialize and verify disposable-only Wrangler config
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp infra/cloudflare/wrangler.disposable.example.toml infra/cloudflare/wrangler.disposable.toml
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          const path = "infra/cloudflare/wrangler.disposable.toml";
+          const clientId = process.env.NEO_GOOGLE_WEB_CLIENT_ID;
+          const config = fs.readFileSync(path, "utf8").replaceAll("REPLACE-WITH-GOOGLE-WEB-CLIENT-ID", clientId);
+          for (const required of [
+            'name = "neo-api-disposable-staging"',
+            'database_name = "neo-staging-db"',
+            'database_id = "dd4c03d6-a286-4ac9-abbc-8f162b692acc"',
+            'migrations_dir = "migrations"',
+          ]) {
+            if (!config.includes(required)) throw new Error("Disposable config identity mismatch: " + required);
+          }
+          if (config.includes("REPLACE-WITH-") || config.includes("[triggers]")) {
+            throw new Error("Unresolved placeholder or scheduled trigger found in disposable config");
+          }
+          fs.writeFileSync(path, config);
+          NODE
+
+      - name: Verify remote D1 identity and record Time Travel bookmark
+        working-directory: infra/cloudflare/worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler d1 info neo-staging-db --json --config ../wrangler.disposable.toml > /tmp/neo-d1-info.json
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          const expected = process.env.EXPECTED_D1_ID;
+          const value = JSON.parse(fs.readFileSync("/tmp/neo-d1-info.json", "utf8"));
+          const ids = [];
+          const visit = (item) => {
+            if (!item || typeof item !== "object") return;
+            for (const [key, child] of Object.entries(item)) {
+              if (["uuid", "database_id", "databaseId"].includes(key) && typeof child === "string") ids.push(child);
+              visit(child);
+            }
+          };
+          visit(value);
+          if (!ids.includes(expected)) throw new Error("D1 identity could not be proven to match the approved staging UUID; refusing to continue");
+          NODE
+          npx wrangler d1 time-travel info neo-staging-db --json --config ../wrangler.disposable.toml > /tmp/neo-d1-bookmark.json
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          const value = JSON.parse(fs.readFileSync("/tmp/neo-d1-bookmark.json", "utf8"));
+          const bookmarks = [];
+          const visit = (item) => {
+            if (!item || typeof item !== "object") return;
+            for (const [key, child] of Object.entries(item)) {
+              if (key.toLowerCase().includes("bookmark") && typeof child === "string") bookmarks.push(child);
+              visit(child);
+            }
+          };
+          visit(value);
+          if (!bookmarks.length) throw new Error("No D1 Time Travel bookmark was returned");
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+            ["### NEO disposable D1 preflight", "", "- Database: `neo-staging-db`",
+             "- Database ID: `" + process.env.EXPECTED_D1_ID + "`",
+             "- Pre-migration bookmark: `" + bookmarks[0] + "`", ""].join(String.fromCharCode(10)));
+          NODE
+
+      - name: Export pre-migration SQL backup to ephemeral runner
+        working-directory: infra/cloudflare/worker
+        run: |
+          # Wrangler may print a short-lived signed export URL during export.
+          # Keep all CLI output off public Actions logs; report only success/failure.
+          if ! npx wrangler d1 export neo-staging-db --remote --output=/tmp/neo-staging-pre-migration.sql --config ../wrangler.disposable.toml >/tmp/neo-d1-export.log 2>&1; then
+            echo "::error::D1 export failed. CLI output was withheld to avoid exposing temporary signed export URLs in public logs."
+            exit 1
+          fi
+          test -s /tmp/neo-staging-pre-migration.sql
+          echo "SQL export verified on ephemeral runner; CLI output and backup remain private to the ephemeral runner."
+
+      - name: Show current remote migration state
+        working-directory: infra/cloudflare/worker
+        run: npx wrangler d1 migrations list neo-staging-db --remote --config ../wrangler.disposable.toml
+
+      - id: restore_attestation
+        name: Verify owner-local restore attestation and exact encrypted backup artifact
+        if: steps.approval.outputs.apply == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=infra/cloudflare/D1_RESTORE_ATTESTATION.txt
+          backup_run_id="$(sed -n 's/^BACKUP_RUN_ID=//p' "$file")"
+          backup_sha256="$(sed -n 's/^BACKUP_SHA256=//p' "$file")"
+          [[ "$backup_run_id" =~ ^[0-9]+$ ]] || { echo "::error::Restore attestation must include a numeric backup run ID."; exit 1; }
+          [[ "$backup_sha256" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::Restore attestation must include a SHA-256 hash."; exit 1; }
+          echo "backup_run_id=$backup_run_id" >> "$GITHUB_OUTPUT"
+          echo "backup_sha256=$backup_sha256" >> "$GITHUB_OUTPUT"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$backup_run_id" > /tmp/neo-backup-run.json
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          const r=JSON.parse(fs.readFileSync("/tmp/neo-backup-run.json","utf8"));
+          if(r.path!==".github/workflows/neo-encrypted-d1-backup.yml")throw new Error("Restore attestation references a run that is not the encrypted D1 backup workflow");
+          if(r.conclusion!=="success"||r.status!=="completed")throw new Error("Referenced encrypted backup run did not succeed");
+          if(r.head_branch!=="neo/foundation-architecture"||r.event!=="workflow_dispatch")throw new Error("Referenced backup run was not manually dispatched from the engineering branch");
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, "backup_commit="+r.head_sha+"\nbackup_attempt="+r.run_attempt+"\n");
+          NODE
+
+      - name: Download the exact backup artifact cited by restore attestation
+        if: steps.approval.outputs.apply == 'true'
+        uses: actions/download-artifact@v7
+        with:
+          name: neo-staging-d1-encrypted-backup-${{ steps.restore_attestation.outputs.backup_run_id }}
+          run-id: ${{ steps.restore_attestation.outputs.backup_run_id }}
+          github-token: ${{ github.token }}
+          path: /tmp/neo-staging-restore-attestation
+
+      - name: Verify backup hash and source identity against restore attestation
+        id: backup
+        if: steps.approval.outputs.apply == 'true'
+        shell: bash
+        env:
+          EXPECTED_BACKUP_SHA256: ${{ steps.restore_attestation.outputs.backup_sha256 }}
+          EXPECTED_BACKUP_COMMIT: ${{ steps.restore_attestation.outputs.backup_commit }}
+          EXPECTED_BACKUP_ATTEMPT: ${{ steps.restore_attestation.outputs.backup_attempt }}
+        run: |
+          set -euo pipefail
+          cd /tmp/neo-staging-restore-attestation
+          test -s neo-staging-db.sql.age
+          test -s SHA256SUMS
+          test -s backup-manifest.txt
+          sha256sum -c SHA256SUMS
+          actual="$(awk 'NR==1 {print $1}' SHA256SUMS)"
+          test "$actual" = "$EXPECTED_BACKUP_SHA256" || { echo "::error::Backup artifact SHA-256 does not match restore attestation."; exit 1; }
+          grep -Fqx "Database UUID: $EXPECTED_D1_ID" backup-manifest.txt || { echo "::error::Backup source UUID mismatch."; exit 1; }
+          grep -Fqx "Run ID: ${{ steps.restore_attestation.outputs.backup_run_id }}" backup-manifest.txt || { echo "::error::Backup run ID mismatch."; exit 1; }
+          grep -Fqx "Commit: $EXPECTED_BACKUP_COMMIT" backup-manifest.txt || { echo "::error::Backup commit does not match the GitHub workflow run head."; exit 1; }
+          grep -Fqx "Run attempt: $EXPECTED_BACKUP_ATTEMPT" backup-manifest.txt || { echo "::error::Backup run attempt does not match the referenced workflow run."; exit 1; }
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Owner-local restore attestation verified"
+            echo "- Backup run: ${{ steps.restore_attestation.outputs.backup_run_id }}"
+            echo "- Encrypted backup SHA-256: $actual"
+            echo "- Source D1 UUID: $EXPECTED_D1_ID"
+            echo "- Recovery D1 UUID: a426343d-7c85-4441-a46a-7b7cead38ceb"
+            echo "- Owner-local restore: explicitly attested"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Apply migrations only when explicitly approved and restore attestation is verified
+        if: steps.approval.outputs.apply == 'true' && steps.backup.outputs.ready == 'true'
+        working-directory: infra/cloudflare/worker
+        run: npx wrangler d1 migrations apply neo-staging-db --remote --config ../wrangler.disposable.toml
+
+      - name: Verify final migration state and critical schema objects
+        if: steps.approval.outputs.apply == 'true' && steps.backup.outputs.ready == 'true'
+        working-directory: infra/cloudflare/worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler d1 migrations list neo-staging-db --remote --config ../wrangler.disposable.toml
+          npx wrangler d1 execute neo-staging-db --remote --json --command "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('accounts','devices','memory_records','task_leases','provider_spend_usage','oidc_login_challenges','browser_sessions') ORDER BY name" --config ../wrangler.disposable.toml > /tmp/neo-d1-schema.json
+          for name in accounts devices memory_records task_leases provider_spend_usage oidc_login_challenges browser_sessions; do
+            grep -q "$name" /tmp/neo-d1-schema.json || {
+              echo "::error::Expected D1 table missing after migration: $name"; exit 1;
+            }
+          done
+          npx wrangler d1 execute neo-staging-db --remote --json --command "SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('provider_token_budget_reserve_before_insert','oidc_login_challenge_rate_limit','provider_spend_terminal_reservation_immutable')" --config ../wrangler.disposable.toml > /tmp/neo-d1-triggers.json
+          grep -q "provider_token_budget_reserve_before_insert" /tmp/neo-d1-triggers.json
+          grep -q "oidc_login_challenge_rate_limit" /tmp/neo-d1-triggers.json
+          grep -q "provider_spend_terminal_reservation_immutable" /tmp/neo-d1-triggers.json
+          npx wrangler d1 execute neo-staging-db --remote --json --command "SELECT name FROM sqlite_master WHERE type='index' AND name IN ('browser_sessions_by_account','browser_sessions_by_device','browser_sessions_by_expiry','browser_sessions_one_active_per_device')" --config ../wrangler.disposable.toml > /tmp/neo-d1-session-indexes.json
+          for name in browser_sessions_by_account browser_sessions_by_device browser_sessions_by_expiry browser_sessions_one_active_per_device; do
+            grep -q "$name" /tmp/neo-d1-session-indexes.json || {
+              echo "::error::Expected browser session index missing after migration: $name"; exit 1;
+            }
+          done
+          echo "### D1 migrations applied and critical schema verified" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup ephemeral D1 export and verification files
+        if: always()
+        run: |
+          rm -f /tmp/neo-staging-pre-migration.sql /tmp/neo-d1-export.log /tmp/neo-d1-info.json /tmp/neo-d1-bookmark.json /tmp/neo-d1-schema.json /tmp/neo-d1-triggers.json /tmp/neo-d1-session-indexes.json
+
+      - name: Cleanup backup attestation download
+        if: always()
+        run: rm -rf /tmp/neo-staging-restore-attestation /tmp/neo-backup-run.json
+
+      - name: Confirm preflight-only run made no schema changes
+        if: steps.approval.outputs.apply != 'true'
+        run: echo "Read-only preflight completed. No D1 migrations were applied." >> "$GITHUB_STEP_SUMMARY"

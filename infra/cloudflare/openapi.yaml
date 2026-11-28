@@ -1,0 +1,814 @@
+openapi: 3.1.0
+info:
+  title: NEO Cloud API
+  version: 0.1.0
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+  description: >
+    Implemented v0 contract for the cloud-first NEO gateway. Memory and task payloads
+    are client-encrypted. Google OIDC ID tokens or an optional Cloudflare Access
+    assertion establish account identity; first Google device enrolment requires
+    a short-lived, one-time server nonce. Device-authenticated routes also require
+    P-256 signatures and one-use request nonces. This API is deployed only to
+    disposable staging; remote D1 migrations and production readiness remain pending.
+servers:
+  - url: https://{workerHost}/v1
+    variables:
+      workerHost:
+        default: neo-staging.example.workers.dev
+security:
+  - neoIdentityBearer: []
+  - cloudflareAccessAssertion: []
+  - neoBrowserSession: []
+paths:
+  /health:
+    get:
+      operationId: healthCheck
+      security: []
+      summary: Liveness check
+      responses:
+        "4XX":
+          description: Invalid health-check request.
+        "200":
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    const: ok
+  /config:
+    get:
+      operationId: getPublicClientConfig
+      security: []
+      summary: Return public browser authentication configuration
+      responses:
+        "200":
+          description: Public browser configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [google_web_client_id]
+                properties:
+                  google_web_client_id:
+                    type: [string, "null"]
+  /auth/challenge:
+    get:
+      operationId: createOidcLoginChallenge
+      security: []
+      summary: Create a short-lived, one-time Google OIDC nonce
+      description: Returns a ten-minute nonce for the Google ID-token request. The Worker stores only its hash, limits issuance per requester IP, and atomically consumes it on first-device enrollment. A challenge cannot be reused.
+      responses:
+        "200":
+          description: One-time Google OIDC challenge
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nonce, expires_at]
+                properties:
+                  nonce:
+                    type: string
+                    minLength: 40
+                    maxLength: 64
+                  expires_at:
+                    type: integer
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          description: Challenge service unavailable
+  /session:
+    get:
+      operationId: getSessionIdentity
+      summary: Resolve the authenticated account subject for browser storage bootstrap
+      description: With a valid HttpOnly browser cookie, returns the account and device session scope. Otherwise accepts a verified Google OIDC or Cloudflare Access identity token to bootstrap first enrolment. Responses are not cacheable.
+      responses:
+        "200":
+          description: Verified identity bootstrap or active browser session
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [account_id, session_type]
+                properties:
+                  account_id:
+                    type: string
+                  session_type:
+                    enum: [identity_bootstrap, browser]
+                  device_id:
+                    type: string
+                    description: Present only for an active browser session.
+                  expires_at:
+                    type: integer
+                    description: Idle expiry timestamp for the browser session.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /auth/logout:
+    post:
+      operationId: logoutBrowserSession
+      security:
+        - neoBrowserSession: []
+      summary: Revoke the current browser session and clear its cookie
+      description: Requires an exact same-origin Origin header and rejects cross-site Fetch Metadata. Revokes the server-side session hash and clears the HttpOnly cookie.
+      parameters:
+        - name: Origin
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: Sec-Fetch-Site
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Browser session revoked and cookie cleared.
+        "403":
+          description: Cross-origin logout rejected.
+  /devices:
+    get:
+      operationId: listDevices
+      summary: List devices registered to the authenticated account
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "4XX":
+          description: Client request rejected.
+        "200":
+          description: Registered devices
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [devices]
+                properties:
+                  devices:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Device"
+    post:
+      operationId: enrolDevice
+      summary: Enrol a device public key
+      description: First Google-backed device enrolment requires the one-time nonce from GET /auth/challenge to be present in the signed Google ID token. Replays are rejected.
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label, platform, public_key_jwk, capabilities]
+              properties:
+                label:
+                  type: string
+                  maxLength: 80
+                platform:
+                  type: string
+                  enum: [android, ios, windows, macos, linux, browser, other]
+                public_key_jwk:
+                  type: object
+                  additionalProperties: true
+                capabilities:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: Existing matching device verified; a browser session may be rotated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceEnrollment"
+        "201":
+          description: Device enrolled; a verified browser enrollment also issues an HttpOnly session cookie.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceEnrollment"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /devices/heartbeat:
+    post:
+      operationId: heartbeatDevice
+      summary: Refresh the authenticated device's online presence
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "4XX":
+          description: Client request rejected.
+        "200":
+          description: Device heartbeat accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device_id, status, last_seen_at, server_time]
+                properties:
+                  device_id:
+                    type: string
+                  status:
+                    const: active
+                  last_seen_at:
+                    type: integer
+                  server_time:
+                    type: integer
+  /devices/{deviceId}:
+    delete:
+      operationId: revokeDevice
+      summary: Revoke a device immediately
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: deviceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Device revoked
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /memory:
+    get:
+      operationId: syncMemory
+      summary: Synchronise memory records
+      description: Returns encrypted records; approved records are the default recall set.
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: include_pending
+          in: query
+          description: Include pending review items for the review UI; never makes them recallable.
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "4XX":
+          description: Client request rejected.
+        "200":
+          description: Encrypted memory changes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [records, next_cursor]
+                properties:
+                  records:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/MemoryRecord"
+                  next_cursor:
+                    type: [string, "null"]
+    post:
+      operationId: createMemory
+      summary: Create a pending memory candidate
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Stable key for safe retry after a network failure; reusing it with different content returns 409.
+          schema:
+            type: string
+            minLength: 16
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EncryptedMemoryInput"
+      responses:
+        "201":
+          description: Candidate stored as pending
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryRecord"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /memory/{memoryId}/approve:
+    post:
+      operationId: approveMemory
+      summary: Explicitly approve a pending memory candidate
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: memoryId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: If-Match
+          in: header
+          required: true
+          description: Expected current revision; stale approvals are rejected.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Memory promoted to approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryRecord"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /memory/{memoryId}/reject:
+    post:
+      operationId: rejectMemory
+      summary: Explicitly reject a pending memory candidate
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: memoryId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: If-Match
+          in: header
+          required: true
+          description: Expected current revision; stale rejections are rejected.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Memory marked rejected and excluded from recall
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryRecord"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /memory/{memoryId}:
+    delete:
+      operationId: tombstoneMemory
+      summary: Tombstone a memory record across all devices
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: memoryId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: If-Match
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deletion tombstone created
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /tasks:
+    post:
+      operationId: enqueueTask
+      summary: Queue encrypted work for an authorised account device
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [task_kind, payload_ciphertext, payload_nonce, key_version]
+              properties:
+                task_kind:
+                  type: string
+                  pattern: '^[a-z][a-z0-9_.-]{1,63}$'
+                payload_ciphertext:
+                  type: string
+                  contentEncoding: base64url
+                payload_nonce:
+                  type: string
+                  contentEncoding: base64url
+                key_version:
+                  type: integer
+                  minimum: 1
+                required_capabilities:
+                  type: array
+                  maxItems: 32
+                  uniqueItems: true
+                  items:
+                    type: string
+                    pattern: '^[a-z][a-z0-9_.-]{0,63}$'
+                  description: Every listed capability must be present on a device before it can claim this task.
+      responses:
+        "202":
+          description: Task queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [task_id, state]
+                properties:
+                  task_id:
+                    type: string
+                  state:
+                    const: queued
+        "429":
+          description: Account rate limit reached.
+  /tasks/claim:
+    post:
+      operationId: claimTask
+      summary: Claim the oldest queued task supported by this device
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lease_seconds:
+                  type: integer
+                  minimum: 30
+                  maximum: 300
+      responses:
+        "200":
+          description: A supported task lease, or null when none is available
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [task]
+                properties:
+                  task:
+                    oneOf:
+                      - type: "null"
+                      - type: object
+                        required: [task_id, task_kind, state, lease_expires_at]
+                        properties:
+                          task_id:
+                            type: string
+                          task_kind:
+                            type: string
+                          state:
+                            const: leased
+                          lease_expires_at:
+                            type: integer
+                          payload_ciphertext:
+                            type: string
+                            contentEncoding: base64url
+                          payload_nonce:
+                            type: string
+                            contentEncoding: base64url
+                          key_version:
+                            type: integer
+        "429":
+          description: Account rate limit reached.
+  /tasks/{taskId}:
+    get:
+      operationId: getTaskState
+      summary: Get task state for the authenticated account
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Task state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateTaskState
+      summary: Update a task state held by the calling device
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state]
+              properties:
+                state:
+                  enum: [running, succeeded, failed, queued]
+      responses:
+        "200":
+          description: Task state updated
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /chat/completions:
+    post:
+      operationId: createChatCompletion
+      summary: Generate a response using the server-side model router
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messages]
+              properties:
+                model:
+                  type: string
+                  description: Exact model ID or auto. Explicit IDs never silently fall back.
+                allow_fallback:
+                  type: boolean
+                  default: true
+                max_tokens:
+                  type: integer
+                  minimum: 1
+                  description: Per-request output-token maximum; must not exceed the server MAX_OUTPUT_TOKENS.
+                max_completion_tokens:
+                  type: integer
+                  minimum: 1
+                  description: Alternative provider-compatible output-token maximum.
+                messages:
+                  type: array
+                  items:
+                    type: object
+                    required: [role, content]
+                    properties:
+                      role:
+                        enum: [system, user, assistant]
+                      content:
+                        type: string
+      responses:
+        "200":
+          description: OpenAI-compatible response with NEO routing metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [choices, neo]
+                properties:
+                  choices:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        message:
+                          type: object
+                          properties:
+                            role:
+                              type: string
+                            content:
+                              type: string
+                  neo:
+                    type: object
+                    required: [provider, model, tier, fallback_used]
+                    properties:
+                      provider:
+                        type: string
+                      model:
+                        type: string
+                      tier:
+                        enum: [primary, backup]
+                      fallback_used:
+                        type: boolean
+                      fallback_reason:
+                        type: [string, "null"]
+                      latency_ms:
+                        type: integer
+                      account_scope:
+                        const: private
+        "429":
+          description: Account rate limit reached.
+        "502":
+          description: Configured provider failed.
+        "503":
+          description: No model provider is configured.
+  /voice/transcribe:
+    post:
+      operationId: transcribeVoice
+      summary: Transcribe a bounded audio upload using the configured voice provider
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          audio/webm:
+            schema:
+              type: string
+              format: binary
+          audio/wav:
+            schema:
+              type: string
+              format: binary
+          audio/mpeg:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Provider transcription response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "413":
+          description: Audio payload exceeds 15 MB.
+        "429":
+          description: Account rate limit reached.
+  /voice/synthesize:
+    post:
+      operationId: synthesizeVoice
+      summary: Synthesize speech from a provider-compatible JSON request
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Generated audio
+          content:
+            audio/mpeg:
+              schema:
+                type: string
+                format: binary
+        "413":
+          description: Request body exceeds the configured JSON limit.
+        "429":
+          description: Account rate limit reached.
+
+components:
+  securitySchemes:
+    neoIdentityBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Google OIDC ID token, or a configured Cloudflare Access JWT fallback. Worker verifies issuer, signature, audience, and expiry.
+    cloudflareAccessAssertion:
+      type: apiKey
+      in: header
+      name: Cf-Access-Jwt-Assertion
+      description: Signed assertion injected by Cloudflare Access for protected browser requests. Browser JavaScript must not read or set this header.
+    neoBrowserSession:
+      type: apiKey
+      in: cookie
+      name: __Host-neo_session
+      description: Opaque, revocable browser session. The Worker stores only its SHA-256 hash. Protected browser API requests still require X-NEO-Device-ID and P-256 request-proof headers.
+  parameters:
+    DeviceId:
+      name: X-NEO-Device-ID
+      in: header
+      required: true
+      schema:
+        type: string
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+  responses:
+    Conflict:
+      description: Revision conflict or idempotency key reused with a different payload.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: string
+              current_revision:
+                type: [integer, "null"]
+    NotFound:
+      description: Resource not found for this account.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: string
+    Unauthorized:
+      description: Identity token or device proof is invalid, expired or revoked.
+    RateLimited:
+      description: Per-account request limit or budget limit reached.
+  schemas:
+    DeviceEnrollment:
+      type: object
+      required: [device_id, account_id, status]
+      properties:
+        device_id:
+          type: string
+        account_id:
+          type: string
+        status:
+          const: enrolled
+        session_type:
+          const: browser
+          description: Present only when a browser session cookie was issued.
+    Device:
+      type: object
+      required: [device_id, label, platform, status, capabilities]
+      properties:
+        device_id:
+          type: string
+        label:
+          type: string
+        platform:
+          type: string
+        status:
+          enum: [active, revoked]
+        presence:
+          enum: [online, offline, revoked]
+        capabilities:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: integer
+        last_seen_at:
+          type: [integer, "null"]
+    EncryptedMemoryInput:
+      type: object
+      required: [memory_id, payload_ciphertext, payload_nonce, key_version]
+      properties:
+        memory_id:
+          type: string
+        payload_ciphertext:
+          type: string
+          contentEncoding: base64url
+        payload_nonce:
+          type: string
+          contentEncoding: base64url
+        key_version:
+          type: integer
+          minimum: 1
+        source_kind:
+          type: string
+    MemoryRecord:
+      allOf:
+        - $ref: "#/components/schemas/EncryptedMemoryInput"
+        - type: object
+          required: [revision, trust_state, updated_at]
+          properties:
+            revision:
+              type: integer
+              minimum: 1
+            trust_state:
+              enum: [pending, approved, rejected, quarantined, deleted]
+            created_at:
+              type: integer
+            updated_at:
+              type: integer
+            tombstoned_at:
+              type: [integer, "null"]
+    Task:
+      type: object
+      required: [task_id, state, task_kind]
+      properties:
+        task_id:
+          type: string
+        state:
+          enum: [queued, leased, running, succeeded, failed, cancelled]
+        task_kind:
+          type: string
+        assigned_device_id:
+          type: [string, "null"]
+        lease_expires_at:
+          type: [integer, "null"]
+        created_at:
+          type: integer
+        updated_at:
+          type: integer

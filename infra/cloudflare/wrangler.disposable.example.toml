@@ -1,0 +1,44 @@
+# Disposable NEO staging template.
+# Dedicated disposable staging configuration for the owner's NEO D1 database.
+# Keep scheduled maintenance disabled until migrations 0001-0010 have been
+# explicitly applied to this disposable database and the schema is verified.
+# Google OIDC is configured with the public Web client ID at deploy time.
+# Optional Cloudflare Access fallback remains unset. Provider credentials and budgets stay disabled.
+name = "neo-api-disposable-staging"
+main = "worker/src/index.ts"
+compatibility_date = "2026-11-20"
+workers_dev = true
+
+[assets]
+directory = "clients/web/dist"
+binding = "ASSETS"
+run_worker_first = ["/v1/*"]
+
+
+[vars]
+NEO_ENV = "disposable-staging"
+MAX_REQUESTS_PER_MINUTE = "30"
+MAX_MONTHLY_SPEND_USD_MICROS = "0"
+MAX_MONTHLY_INPUT_TOKENS = "0"
+MAX_MONTHLY_OUTPUT_TOKENS = "0"
+MAX_PROMPT_BYTES = "64000"
+MAX_OUTPUT_TOKENS = "256"
+MODEL_PRIMARY_INPUT_USD_MICROS_PER_1M = "0"
+MODEL_PRIMARY_OUTPUT_USD_MICROS_PER_1M = "0"
+MODEL_BACKUP_INPUT_USD_MICROS_PER_1M = "0"
+MODEL_BACKUP_OUTPUT_USD_MICROS_PER_1M = "0"
+VOICE_TRANSCRIBE_MAX_COST_USD_MICROS = "0"
+VOICE_SYNTHESIS_MAX_COST_USD_MICROS = "0"
+MAX_BODY_BYTES = "500000"
+GOOGLE_WEB_CLIENT_ID = "REPLACE-WITH-GOOGLE-WEB-CLIENT-ID"
+GOOGLE_OAUTH_CLIENT_IDS = "REPLACE-WITH-GOOGLE-WEB-CLIENT-ID"
+MODEL_PRIMARY_NAME = "unset"
+MODEL_BACKUP_NAME = "unset"
+MODEL_PRIMARY_URL = ""
+MODEL_BACKUP_URL = ""
+
+[[d1_databases]]
+binding = "DB"
+database_name = "neo-staging-db"
+database_id = "dd4c03d6-a286-4ac9-abbc-8f162b692acc"
+migrations_dir = "migrations"

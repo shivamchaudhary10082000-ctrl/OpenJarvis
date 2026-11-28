@@ -85,15 +85,17 @@ class FakeScanner:
         )
 
 
-def test_clean_facts_are_tagged_auto_and_stay_recallable(tmp_path):
+def test_clean_facts_are_pending_until_explicit_approval(tmp_path):
     svc = _service(tmp_path, FakeExtractor(["User likes hiking"]))
     svc.start()
     try:
         svc.submit("I love hiking", "Nice!")
         assert _wait_until(lambda: svc.fact_count() == 1)
         fact = svc.list_facts()[0]
-        assert fact.trust == "auto"
-        assert fact.trusted_for_recall is True
+        assert fact.trust == "pending"
+        assert fact.trusted_for_recall is False
+        assert svc._store.approve_pending(0, fact.text) is True
+        assert svc.list_facts()[0].trusted_for_recall is True
     finally:
         svc.stop()
 
@@ -117,6 +119,10 @@ def test_extracted_facts_reach_model_context_end_to_end(tmp_path):
     try:
         svc.submit("I love hiking", "Nice!")
         assert _wait_until(lambda: svc.fact_count() == 1)
+        pending = svc.list_facts()[0]
+        assert pending.trust == "pending"
+        assert pending.trusted_for_recall is False
+        assert svc._store.approve_pending(0, pending.text) is True
         messages = [Message(role=Role.USER, content="what do I like?")]
         augmented = inject_context("hiking", messages, None, facts=svc.list_facts())
     finally:
@@ -179,7 +185,8 @@ def test_low_severity_finding_does_not_drop_the_exchange(tmp_path):
         svc.submit("my build script runs make && rm -rf build", "ok")
         assert _wait_until(lambda: svc.fact_count() == 1)
         assert extractor.calls  # extraction still ran
-        assert svc.list_facts()[0].trust == "auto"
+        assert svc.list_facts()[0].trust == "pending"
+        assert svc.list_facts()[0].trusted_for_recall is False
     finally:
         svc.stop()
 
@@ -197,13 +204,13 @@ def test_flagged_fact_is_quarantined_but_clean_siblings_are_not(tmp_path):
     finally:
         svc.stop()
 
-    assert tiers["User likes tea"] == "auto"
+    assert tiers["User likes tea"] == "pending"
     assert tiers[hostile] == "untrusted"
 
 
-def test_scanner_failure_fails_open(tmp_path):
-    # A scanner error must not block memory — the fact is still captured and
-    # still recallable, exactly as if no scanner were configured.
+def test_scanner_failure_keeps_facts_pending(tmp_path):
+    # A scanner error must not block candidate capture, but without a clean
+    # scan the candidate must remain unavailable for model recall.
     svc = _service(
         tmp_path,
         FakeExtractor(["a fact"]),
@@ -213,7 +220,8 @@ def test_scanner_failure_fails_open(tmp_path):
     try:
         svc.submit("hello", "hi")
         assert _wait_until(lambda: svc.fact_count() == 1)
-        assert svc.list_facts()[0].trust == "auto"
+        assert svc.list_facts()[0].trust == "pending"
+        assert svc.list_facts()[0].trusted_for_recall is False
     finally:
         svc.stop()
 
@@ -249,9 +257,9 @@ def test_legacy_third_party_store_api_remains_supported():
 
     service._process(("content from a page", "noted"))
 
-    # Clean facts still reach legacy backends without a TypeError. A backend
-    # that cannot persist provenance must not receive quarantined facts.
-    assert [fact.text for fact in store.list()] == ["User likes tea"]
+    # A legacy backend cannot persist pending provenance, so it must fail
+    # closed instead of silently storing a new fact as recallable.
+    assert store.list() == []
 
 
 def test_submit_extracts_and_stores(tmp_path):
@@ -262,6 +270,8 @@ def test_submit_extracts_and_stores(tmp_path):
         assert svc.submit("I love hiking", "Nice!") is True
         assert _wait_until(lambda: svc.fact_count() == 1)
         assert [f.text for f in svc.list_facts()] == ["User likes hiking"]
+        assert svc.list_facts()[0].trust == "pending"
+        assert svc.list_facts()[0].trusted_for_recall is False
     finally:
         svc.stop()
 

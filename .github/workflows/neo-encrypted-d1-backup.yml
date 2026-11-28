@@ -1,0 +1,127 @@
+name: NEO encrypted disposable D1 backup
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_backup:
+        description: "Authorize encrypted SQL export of neo-staging-db. No SQL mutations or migrations; D1 may be temporarily locked during export."
+        required: true
+        type: boolean
+        default: false
+  push:
+    branches:
+      - neo/foundation-architecture
+    paths:
+      - .github/workflows/neo-encrypted-d1-backup.yml
+      - infra/cloudflare/D1_BACKUP_EXECUTION_APPROVAL.txt
+
+permissions:
+  contents: read
+
+concurrency:
+  group: neo-disposable-d1-backup
+  cancel-in-progress: false
+
+jobs:
+  export-encrypt:
+    if: |
+      github.ref == 'refs/heads/neo/foundation-architecture' &&
+      (
+        (github.event_name == 'workflow_dispatch' && inputs.confirm_backup == true) ||
+        (github.event_name == 'push' && github.event.head_commit.message == 'NEO: EXECUTE ONE-TIME STAGING BACKUP')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Cloudflare D1 export requires D1 Write and may temporarily lock the database.
+    # Use a Developer Platform Editor token scoped to this single D1 resource.
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_BACKUP_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      AGE_RECIPIENT: ${{ vars.NEO_BACKUP_AGE_RECIPIENT }}
+      EXPECTED_D1_ID: dd4c03d6-a286-4ac9-abbc-8f162b692acc
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Validate backup-only configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            approval="$(tr -d '[:space:]' < infra/cloudflare/D1_BACKUP_EXECUTION_APPROVAL.txt)"
+            [[ "$approval" == "YES" ]] || { echo "::error::Backup approval file must contain exactly YES."; exit 1; }
+          fi
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Missing CLOUDFLARE_D1_BACKUP_TOKEN."; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::Missing CLOUDFLARE_ACCOUNT_ID variable."; exit 1; }
+          [[ "$AGE_RECIPIENT" == age1* ]] || { echo "::error::Set NEO_BACKUP_AGE_RECIPIENT to the owner's age public key."; exit 1; }
+      - name: Install age
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq age
+      - name: Materialize and verify disposable config
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/neo-d1-backup.wrangler.toml <<'TOML'
+          name = "neo-d1-backup-readonly"
+          compatibility_date = "2026-11-20"
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "neo-staging-db"
+          database_id = "dd4c03d6-a286-4ac9-abbc-8f162b692acc"
+          TOML
+          grep -Fqx 'database_name = "neo-staging-db"' /tmp/neo-d1-backup.wrangler.toml
+          grep -Fqx 'database_id = "dd4c03d6-a286-4ac9-abbc-8f162b692acc"' /tmp/neo-d1-backup.wrangler.toml
+          if grep -Eq 'REPLACE-WITH-|\[triggers\]|assets|workers_dev' /tmp/neo-d1-backup.wrangler.toml; then
+            echo "::error::Unexpected Worker deployment configuration in backup-only config."
+            exit 1
+          fi
+
+      - name: Verify D1 identity
+        working-directory: infra/cloudflare/worker
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.157.0 d1 info neo-staging-db --json --config /tmp/neo-d1-backup.wrangler.toml >/tmp/info.json
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          const data=JSON.parse(fs.readFileSync("/tmp/info.json","utf8"));
+          const ids=[];
+          function walk(x){if(!x||typeof x!=="object")return;for(const [k,v] of Object.entries(x)){if(["uuid","database_id","databaseId"].includes(k)&&typeof v==="string")ids.push(v);walk(v);}}
+          walk(data);
+          if(!ids.includes(process.env.EXPECTED_D1_ID))throw new Error("Remote D1 UUID did not match approved staging DB");
+          NODE
+      - name: Export SQL (withhold Wrangler output)
+        working-directory: infra/cloudflare/worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! npx --yes wrangler@4.157.0 d1 export neo-staging-db --remote --output=/tmp/neo-staging-db.sql --config /tmp/neo-d1-backup.wrangler.toml >/tmp/wrangler-export.log 2>&1; then
+            echo "::error::Export failed; CLI output withheld to prevent signed URL leakage."
+            exit 1
+          fi
+          test -s /tmp/neo-staging-db.sql
+      - name: Encrypt export and create integrity manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          age --encrypt --recipient "$AGE_RECIPIENT" --output /tmp/neo-staging-db.sql.age /tmp/neo-staging-db.sql
+          test -s /tmp/neo-staging-db.sql.age
+          (cd /tmp && sha256sum neo-staging-db.sql.age > /tmp/SHA256SUMS)
+          printf 'Database UUID: %s\nCommit: %s\nRun ID: %s\nRun attempt: %s\nCreated UTC: %s\n' "$EXPECTED_D1_ID" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$(date -u +%FT%TZ)" >/tmp/backup-manifest.txt
+          echo "Only encrypted SQL, checksum, and metadata manifest will be uploaded."
+      - name: Upload encrypted backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neo-staging-d1-encrypted-backup-${{ github.run_id }}
+          path: |
+            /tmp/neo-staging-db.sql.age
+            /tmp/SHA256SUMS
+            /tmp/backup-manifest.txt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Cleanup plaintext export
+        if: always()
+        run: rm -f /tmp/neo-staging-db.sql /tmp/neo-staging-db.sql.age /tmp/SHA256SUMS /tmp/backup-manifest.txt /tmp/wrangler-export.log /tmp/info.json

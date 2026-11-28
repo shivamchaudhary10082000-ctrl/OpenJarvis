@@ -1,0 +1,225 @@
+name: NEO encrypted D1 backup artifact rehearsal
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/neo-d1-artifact-recovery-rehearsal.yml
+      - .github/workflows/neo-encrypted-d1-backup.yml
+      - .github/workflows/neo-disposable-staging.yml
+      - infra/cloudflare/worker/scripts/restore-d1-backup-to-recovery.sh
+      - infra/cloudflare/worker/scripts/prepare-d1-import.sh
+      - infra/cloudflare/worker/scripts/test-d1-import-sanitizer.sh
+      - infra/cloudflare/D1_RESTORE_ATTESTATION.txt
+      - infra/cloudflare/D1_STAGING_RUNBOOK.md
+      - infra/cloudflare/worker/D1_BACKUP_RECOVERY_RUNBOOK.md
+  push:
+    branches:
+      - neo/foundation-architecture
+    paths:
+      - .github/workflows/neo-d1-artifact-recovery-rehearsal.yml
+      - infra/cloudflare/worker/scripts/restore-d1-backup-to-recovery.sh
+      - infra/cloudflare/worker/scripts/prepare-d1-import.sh
+      - infra/cloudflare/worker/scripts/test-d1-import-sanitizer.sh
+      - .github/workflows/neo-encrypted-d1-backup.yml
+      - .github/workflows/neo-disposable-staging.yml
+      - infra/cloudflare/D1_RESTORE_ATTESTATION.txt
+      - infra/cloudflare/D1_STAGING_RUNBOOK.md
+      - infra/cloudflare/worker/D1_BACKUP_RECOVERY_RUNBOOK.md
+permissions:
+  contents: read
+  actions: read
+jobs:
+  isolated-backup-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check owner-local restore script syntax and safety constants
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=infra/cloudflare/worker/scripts/restore-d1-backup-to-recovery.sh
+          bash -n "$script"
+          bash -n infra/cloudflare/worker/scripts/prepare-d1-import.sh
+          grep -Fq 'TARGET_ID="a426343d-7c85-4441-a46a-7b7cead38ceb"' "$script"
+          grep -Fq 'TARGET_NAME="neo-staging-recovery-test"' "$script"
+          grep -Fq 'SOURCE_ID="dd4c03d6-a286-4ac9-abbc-8f162b692acc"' "$script"
+          grep -Fq 'AGE_IDENTITY_FILE' "$script"
+          grep -Fq 'BACKUP_ATTEMPT' "$script"
+          grep -Fq 'BACKUP_CREATED_UTC' "$script"
+          grep -Fq 'BACKUP_SHA256' "$script"
+          grep -Fq 'spawnSync("npx",["--yes","wrangler@4.157.0"' "$script"
+          grep -Fq 'expected encrypted backup file' "$script"
+          if grep -Eq 'secrets\.NEO_BACKUP_AGE_IDENTITY|R2_BUCKET|r2\.cloudflarestorage' "$script"; then
+            echo "::error::Owner-local restore script must not require GitHub-held private keys or R2."
+            exit 1
+          fi
+          backup=.github/workflows/neo-encrypted-d1-backup.yml
+          grep -Fq "github.event_name == 'workflow_dispatch' && inputs.confirm_backup == true" "$backup"
+          grep -Fq "github.event.head_commit.message == 'NEO: EXECUTE ONE-TIME STAGING BACKUP'" "$backup"
+          grep -Fq 'infra/cloudflare/D1_BACKUP_EXECUTION_APPROVAL.txt' "$backup"
+          grep -Fqx 'NO' infra/cloudflare/D1_BACKUP_EXECUTION_APPROVAL.txt
+          grep -Fq 'age --encrypt --recipient "$AGE_RECIPIENT"' "$backup"
+          grep -Fq 'actions/upload-artifact@v4' "$backup"
+          grep -Fq 'Run ID: %s' "$backup"
+          grep -Fq '(cd /tmp && sha256sum neo-staging-db.sql.age > /tmp/SHA256SUMS)' "$backup"
+          if grep -Eq 'AGE_IDENTITY|R2_BUCKET|r2[.]cloudflarestorage|wrangler d1 migrations apply' "$backup"; then
+            echo "::error::Backup workflow must not hold the owner private key, depend on R2, or apply migrations."
+            exit 1
+          fi
+          migration=.github/workflows/neo-disposable-staging.yml
+          attestation=infra/cloudflare/D1_RESTORE_ATTESTATION.txt
+          grep -Fq 'RESTORE_VERIFIED=NO' "$attestation"
+          grep -Fq 'RECOVERY_D1_UUID=a426343d-7c85-4441-a46a-7b7cead38ceb' "$attestation"
+          grep -Fq 'actions: read' "$migration"
+          grep -Fq 'RESTORE_VERIFIED=YES' "$migration"
+          grep -Fq 'actions/download-artifact@v7' "$migration"
+          grep -Fq 'sha256sum -c SHA256SUMS' "$migration"
+          if grep -Eq 'NEO_R2_|R2_BUCKET|r2[.]cloudflarestorage' "$migration"; then
+            echo "::error::Migration gate must not depend on an R2 bucket or credentials."
+            exit 1
+          fi
+          grep -Fq 'APPLY_0001_0012' "$migration"
+          grep -Fq '0012_immutable_terminal_provider_reservations.sql' "$migration"
+          if grep -Fq 'APPLY_0001_0011' "$migration"; then
+            echo "::error::Migration gate still has a stale 0011-only approval label."
+            exit 1
+          fi
+          actual="$(find infra/cloudflare/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort)"
+          expected="$(cat <<'EOF'
+          0001_neo_core.sql
+          0002_device_request_nonces.sql
+          0003_task_capabilities.sql
+          0004_api_rate_limits.sql
+          0005_provider_spend_limits.sql
+          0006_provider_spend_settlement_guard.sql
+          0007_offline_idempotency.sql
+          0008_provider_token_budgets.sql
+          0009_enforce_settled_token_budgets.sql
+          0010_oidc_login_challenges.sql
+          0011_browser_sessions.sql
+          0012_immutable_terminal_provider_reservations.sql
+          EOF
+          )"
+          test "$actual" = "$expected"
+          approval=infra/cloudflare/D1_MIGRATION_APPROVAL.txt
+          grep -Fqx 'NO' "$approval"
+          echo "Restore script syntax, backup-only workflow, and fail-closed migration attestation checks passed."
+      - name: Install age and SQLite
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y age sqlite3
+      - name: Test D1 SQL sanitizer with transaction wrappers and reserved table
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/neo-d1-sanitizer
+          sqlite3 /tmp/neo-d1-sanitizer/source.db <<'SQL'
+          CREATE TABLE rehearsal_records(id INTEGER PRIMARY KEY, label TEXT NOT NULL);
+          INSERT INTO rehearsal_records VALUES (1,'kept-record');
+          CREATE TABLE _cf_KV(key TEXT PRIMARY KEY, value BLOB) WITHOUT ROWID;
+          INSERT INTO _cf_KV VALUES ('internal','must-not-import');
+          SQL
+          bash infra/cloudflare/worker/scripts/prepare-d1-import.sh /tmp/neo-d1-sanitizer/source.db /tmp/neo-d1-sanitizer/import.sql
+          if grep -Eiq 'BEGIN TRANSACTION|COMMIT;|_cf_KV' /tmp/neo-d1-sanitizer/import.sql; then
+            echo "::error::D1 sanitizer left an incompatible statement in the import file."
+            exit 1
+          fi
+          sqlite3 /tmp/neo-d1-sanitizer/restored.db < /tmp/neo-d1-sanitizer/import.sql
+          test "$(sqlite3 /tmp/neo-d1-sanitizer/restored.db 'SELECT label FROM rehearsal_records WHERE id=1;')" = "kept-record"
+          test "$(sqlite3 /tmp/neo-d1-sanitizer/restored.db "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='_cf_KV';")" = "0"
+          test "$(sqlite3 /tmp/neo-d1-sanitizer/restored.db 'PRAGMA integrity_check;')" = "ok"
+          echo "D1 SQL sanitizer preserved user records and removed transaction wrappers and reserved _cf_KV."
+      - name: Cleanup D1 sanitizer fixture
+        if: always()
+        run: rm -rf /tmp/neo-d1-sanitizer
+      - name: Create synthetic database fixture (no Cloudflare credentials)
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/neo-backup-fixture
+          sqlite3 /tmp/neo-backup-fixture/source.db <<'SQL'
+          PRAGMA foreign_keys=ON;
+          CREATE TABLE rehearsal_records(id INTEGER PRIMARY KEY, label TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
+          INSERT INTO rehearsal_records(label,created_at) VALUES
+            ('fixture-alpha','2026-01-01T00:00:00Z'),
+            ('fixture-beta','2026-01-02T00:00:00Z');
+          SQL
+          sqlite3 /tmp/neo-backup-fixture/source.db '.dump' > /tmp/neo-backup-fixture/fixture.sql
+          test -s /tmp/neo-backup-fixture/fixture.sql
+      - name: Generate ephemeral test key and encrypt before upload
+        run: |
+          set -euo pipefail
+          age-keygen -o /tmp/neo-backup-fixture/test-key.txt
+          recipient="$(grep '^# public key:' /tmp/neo-backup-fixture/test-key.txt | awk '{print $4}')"
+          [[ "$recipient" == age1* ]] || { echo "::error::Invalid synthetic age recipient."; exit 1; }
+          age -r "$recipient" -o /tmp/neo-backup-fixture/fixture.sql.age /tmp/neo-backup-fixture/fixture.sql
+          (cd /tmp/neo-backup-fixture && sha256sum fixture.sql.age > ciphertext.sha256)
+          test -s /tmp/neo-backup-fixture/fixture.sql.age
+          test ! -s /tmp/neo-backup-fixture/fixture.sql.age || test "$(head -c 5 /tmp/neo-backup-fixture/fixture.sql.age)" != "SQLite"
+          echo "Synthetic ciphertext created before artifact upload."
+      - name: Upload ciphertext and checksum only
+        id: upload-rehearsal-artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: neo-d1-recovery-rehearsal-${{ github.run_id }}
+          path: |
+            /tmp/neo-backup-fixture/fixture.sql.age
+            /tmp/neo-backup-fixture/ciphertext.sha256
+          retention-days: 1
+          if-no-files-found: error
+      - name: Download artifact for recovery rehearsal (retry eventual artifact indexing)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..8}; do
+            if gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "neo-d1-recovery-rehearsal-$GITHUB_RUN_ID" --dir /tmp/neo-recovery-download; then
+              test -s /tmp/neo-recovery-download/fixture.sql.age
+              test -s /tmp/neo-recovery-download/ciphertext.sha256
+              exit 0
+            fi
+            rm -rf /tmp/neo-recovery-download
+            sleep 3
+          done
+          echo "::error::Synthetic artifact was not available for download after retries."
+          exit 1
+      - name: Verify checksum, detect tampering, decrypt, restore, and validate
+        run: |
+          set -euo pipefail
+          cd /tmp/neo-recovery-download
+          sha256sum -c ciphertext.sha256
+          cp fixture.sql.age tampered.sql.age
+          printf 'tamper' >> tampered.sql.age
+          cp ciphertext.sha256 tampered.sha256
+          sed -i 's/fixture.sql.age/tampered.sql.age/' tampered.sha256
+          if sha256sum -c tampered.sha256; then
+            echo "::error::Tampered ciphertext passed checksum verification."
+            exit 1
+          fi
+          rm tampered.sql.age tampered.sha256
+          age -d -i /tmp/neo-backup-fixture/test-key.txt -o restored.sql fixture.sql.age
+          test -s restored.sql
+          sqlite3 restored.db < restored.sql
+          test "$(sqlite3 restored.db 'SELECT COUNT(*) FROM rehearsal_records;')" = "2"
+          test "$(sqlite3 restored.db "SELECT label FROM rehearsal_records WHERE id=2;")" = "fixture-beta"
+          test "$(sqlite3 restored.db 'PRAGMA integrity_check;')" = "ok"
+          test -z "$(sqlite3 restored.db 'PRAGMA foreign_key_check;')"
+          echo "Checksum verified, tampering detected, decryption, isolated restore and validation passed."
+      - name: Summary
+        run: |
+          {
+            echo "## Encrypted backup artifact rehearsal"
+            echo "- Synthetic fixture only; no Cloudflare credentials or remote D1 access."
+            echo "- Encryption before upload: passed"
+            echo "- Artifact download and ciphertext SHA-256: passed"
+            echo "- Tamper-detection assertion: passed"
+            echo "- Decryption: passed"
+            echo "- Isolated SQLite restore, integrity and fixture validation: passed"
+            echo "- This is a pipeline rehearsal, not a backup of real staging D1."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Cleanup synthetic sensitive material
+        if: always()
+        run: rm -rf /tmp/neo-backup-fixture /tmp/neo-recovery-download

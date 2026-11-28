@@ -49,7 +49,7 @@ jobs:
           assert gate_files == migration_files, f"Remote gate allow-list differs from tested migrations: {gate_files}"
           assert "APPLY_0001_0012" in gate, "Migration approval label is not aligned to 0012"
           assert "APPLY_0001_0011" not in gate, "Stale 0011-only approval label remains"
-          print(f"PASS migration gate allow-list matches {len(migration_files)} exact files")          PY
+          print(f"PASS migration gate allow-list matches {len(migration_files)} exact files")
 
       - name: Execute exact migration files against isolated SQLite
         shell: bash

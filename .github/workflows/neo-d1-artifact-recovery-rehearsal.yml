@@ -1,6 +1,18 @@
 name: NEO encrypted D1 backup artifact rehearsal
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/neo-d1-artifact-recovery-rehearsal.yml
+      - .github/workflows/neo-encrypted-d1-backup.yml
+      - .github/workflows/neo-disposable-staging.yml
+      - infra/cloudflare/worker/scripts/restore-d1-backup-to-recovery.sh
+      - infra/cloudflare/worker/scripts/prepare-d1-import.sh
+      - infra/cloudflare/worker/scripts/test-d1-import-sanitizer.sh
+      - infra/cloudflare/D1_RESTORE_ATTESTATION.txt
+      - infra/cloudflare/D1_STAGING_RUNBOOK.md
+      - infra/cloudflare/worker/D1_BACKUP_RECOVERY_RUNBOOK.md
   push:
     branches:
       - neo/foundation-architecture
@@ -68,6 +80,29 @@ jobs:
             echo "::error::Migration gate must not depend on an R2 bucket or credentials."
             exit 1
           fi
+          grep -Fq 'APPLY_0001_0012' "$migration"
+          grep -Fq '0012_immutable_terminal_provider_reservations.sql' "$migration"
+          if grep -Fq 'APPLY_0001_0011' "$migration"; then
+            echo "::error::Migration gate still has a stale 0011-only approval label."
+            exit 1
+          fi
+          actual="$(find infra/cloudflare/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\\n' | sort)"
+          expected="$(cat <<'EOF'
+          0001_neo_core.sql
+          0002_device_request_nonces.sql
+          0003_task_capabilities.sql
+          0004_api_rate_limits.sql
+          0005_provider_spend_limits.sql
+          0006_provider_spend_settlement_guard.sql
+          0007_offline_idempotency.sql
+          0008_provider_token_budgets.sql
+          0009_enforce_settled_token_budgets.sql
+          0010_oidc_login_challenges.sql
+          0011_browser_sessions.sql
+          0012_immutable_terminal_provider_reservations.sql
+          EOF
+          )"
+          test "$actual" = "$expected"
           approval=infra/cloudflare/D1_MIGRATION_APPROVAL.txt
           grep -Fqx 'NO' "$approval"
           echo "Restore script syntax, backup-only workflow, and fail-closed migration attestation checks passed."

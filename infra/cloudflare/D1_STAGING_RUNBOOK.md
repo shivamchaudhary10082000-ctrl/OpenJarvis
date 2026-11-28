@@ -23,8 +23,9 @@ Migrations are ordered in `infra/cloudflare/migrations/`:
 9. `0009_enforce_settled_token_budgets.sql`
 10. `0010_oidc_login_challenges.sql`
 11. `0011_browser_sessions.sql`
+12. `0012_immutable_terminal_provider_reservations.sql`
 
-Migration 0009 fixes a correctness gap in 0008: token reservation checks must count both settled usage and currently reserved usage against each monthly cap. Migration 0010 adds hashed, short-lived, one-time OIDC nonce challenges used to protect first-device enrollment from ID-token replay. Migration 0011 adds opaque, revocable browser sessions bound to an enrolled device and its P-256 public key; only the SHA-256 session-token hash is stored.
+Migration 0009 fixes a correctness gap in 0008: token reservation checks must count both settled usage and currently reserved usage against each monthly cap. Migration 0010 adds hashed, short-lived, one-time OIDC nonce challenges used to protect first-device enrollment from ID-token replay. Migration 0011 adds opaque, revocable browser sessions bound to an enrolled device and its P-256 public key; only the SHA-256 session-token hash is stored. Migration 0012 prevents terminal provider reservation ledger rows from being rewritten after settlement or release.
 
 ## Required preflight
 
@@ -113,7 +114,7 @@ A separate approval-gated job is included in the existing `.github/workflows/neo
 2. For preflight only, edit `D1_MIGRATION_APPROVAL.txt` to `PREFLIGHT_ONLY` and commit to `neo/foundation-architecture` with `[neo-d1-preflight]` in the commit message. This verifies database identity, records a Time Travel bookmark, exports a SQL backup and lists migration state; it does not change the schema.
 3. Inspect the workflow summary and review the pending migration list. The preflight SQL export remains only on the ephemeral runner. Separately dispatch the encrypted backup-only workflow, download its encrypted artifact to the owner's device, and use the owner-local restore script to decrypt and restore into `neo-staging-recovery-test`. The private age identity never enters GitHub.
 4. Only after the owner-local restore script proves schema and table-record equality, local and remote integrity, and zero foreign-key violations, update `D1_RESTORE_ATTESTATION.txt` with `RESTORE_VERIFIED=YES`, the exact source and recovery UUIDs, the successful backup run ID, and the encrypted artifact SHA-256. Keep the private key out of GitHub.
-5. Then, and only then, edit `D1_MIGRATION_APPROVAL.txt` to `APPLY_0001_0011` and commit to the same branch with `[neo-d1-apply]` in the commit message. The migration workflow downloads the exact cited artifact, checks its workflow provenance, source UUID and checksum against the attestation, and refuses to apply if any value differs. It applies only migrations 0001–0011 to the hard-coded staging UUID; it does not depend on R2.
+5. Then, and only then, edit `D1_MIGRATION_APPROVAL.txt` to `APPLY_0001_0012` and commit to the same branch with `[neo-d1-apply]` in the commit message. The migration workflow downloads the exact cited artifact, checks its workflow provenance, source UUID and checksum against the attestation, and refuses to apply if any value differs. It applies only migrations 0001–0012 to the hard-coded staging UUID; it does not depend on R2.
 6. After successful migration, reset both `D1_MIGRATION_APPROVAL.txt` and `D1_RESTORE_ATTESTATION.txt` to `NO`, revoke the temporary D1 migration token and remove its GitHub secret. Keep the existing Worker-only deployment token separate.
 
 The D1 job only runs on the engineering branch when the approval file changes and the commit marker matches the file contents. Ordinary pushes, a default `NO` value, or a mismatched marker cannot apply migrations.

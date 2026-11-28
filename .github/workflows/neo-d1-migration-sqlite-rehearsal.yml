@@ -42,15 +42,14 @@ jobs:
 
           migration_files = sorted(os.path.basename(path) for path in glob.glob("infra/cloudflare/migrations/*.sql"))
           gate = open(".github/workflows/neo-disposable-staging.yml", encoding="utf-8").read()
-          marker = "expected=\"$(cat <<'EOF'\\n"
-          assert marker in gate, "Migration gate's exact-file allow-list is missing"
-          block = gate.split(marker, 1)[1].split("\\n          EOF\\n          )", 1)[0]
-          gate_files = [line.strip() for line in block.splitlines() if line.strip()]
+          lines = gate.splitlines()
+          start = next(i for i, line in enumerate(lines) if line.strip() == "expected=\"$(cat <<'EOF'")
+          end = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == "EOF")
+          gate_files = [line.strip() for line in lines[start + 1:end] if line.strip()]
           assert gate_files == migration_files, f"Remote gate allow-list differs from tested migrations: {gate_files}"
           assert "APPLY_0001_0012" in gate, "Migration approval label is not aligned to 0012"
           assert "APPLY_0001_0011" not in gate, "Stale 0011-only approval label remains"
-          print(f"PASS migration gate allow-list matches {len(migration_files)} exact files")
-          PY
+          print(f"PASS migration gate allow-list matches {len(migration_files)} exact files")          PY
 
       - name: Execute exact migration files against isolated SQLite
         shell: bash

@@ -1,115 +1,112 @@
 # NEO Worker security review and disposable staging readiness
 
-Status as of 2026-11-27. This document separates local/code-level evidence from remote staging evidence. It is not a production-readiness approval.
+Status: 2026-11-28. This is an engineering readiness review, not a production-readiness approval.
 
-## Branch and scope
+## Scope
 
-- Repository: `shivamchaudhary10082000-ctrl/OpenJarvis`.
-- Engineering branch: `neo/foundation-architecture`.
-- Current branch head when this review was updated: `993264105aac60550def09883b054370507dfc81`.
-- Latest code/test change: `c728e40f83b4ea8a2554c548bfab56ec8cf75f19`.
-- PR [#1](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/pull/1) remains Draft, open, unmerged, and targeted at `main`.
-- No changes to `main`, production, billing, paid providers, or the separate Supabase physiotherapy project.
+- Repository: shivamchaudhary10082000-ctrl/OpenJarvis.
+- Branch: neo/foundation-architecture.
+- PR #1 remains Draft, open, unmerged, and targeted at main.
+- The main branch, production, billing, paid providers, and the separate Supabase project remain untouched.
 
-## Latest code-level verification
+## Current code-level verification
 
-Worker CI [run #45913221303](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45913221303) passed on the current docs head. It ran:
+Worker CI run #46104374656 (run 406) completed successfully on the reviewed branch head before this documentation update:
 
-- OpenAPI lint, TypeScript check, Wrangler deploy dry-run.
-- Vitest: **73/73 tests passed** across 3 files.
-- Playwright browser persistence: **9/9 passed** across Chromium, Firefox and WebKit.
+- OpenAPI lint, TypeScript check, and Wrangler deployment dry-run passed.
+- Vitest: 3 files, 76 tests passed.
+- Browser persistence: 15/15 passed across Chromium, Firefox, and WebKit.
 
-The new browser-session integration assertions in `test/security.integration.test.ts` exercise this simulated path using generated test signing keys and local SQLite-backed D1:
+The authentication integration tests use mocked OIDC/JWKS and local SQLite-backed D1. They exercise one-use challenge and nonce handling, a Google-shaped RS256 token, P-256 browser-device enrollment, hash-only session-token persistence, Secure/HttpOnly/SameSite=Strict browser session issuance, signed same-origin heartbeat, logout and revocation, cross-origin rejection, and the fail-closed no-provider chat response. They do not prove a real Google login, live Cloudflare D1, or live authenticated chat.
 
-1. Request a one-use OIDC challenge.
-2. Verify a nonce-bound Google-shaped RS256 ID token using mocked Google JWKS.
-3. Enrol a browser P-256 device.
-4. Issue a Secure, HttpOnly, SameSite=Strict `__Host-neo_session` cookie and verify only its SHA-256 hash is stored.
-5. Resume the browser session and complete a signed same-origin heartbeat.
-6. Submit authenticated `POST /v1/chat/completions` with no provider URL, key, or budget configured; expect `503 model_unconfigured` and zero upstream calls.
-7. Reject cross-origin mutation, log out, clear the cookie, and reject the revoked session.
+## Disposable Worker deployment and health
 
-A separate integration test verifies one-use challenge replay rejection. These are **mocked OIDC/local-D1 integration tests**, not a real Google browser login or a live Cloudflare D1 test. The no-provider chat result is the expected safe failure path; it is not an AI response.
+The last successful disposable deployment that was retrieved is run #45909896048, dated 2026-11-26. It deployed commit e63c6c97b01c420915d6dc0cff236bbeef3db467 and reported Worker version 5ffdb1a6-390a-483a-a2c2-052d11e9ecf7. Its runner-side health probe returned:
 
-Other latest-head workflow results at the time of this review:
-- Web Alpha [#45913221316](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45913221316): success.
-- Frontend CI [#45913221258](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45913221258): success.
-- Memory safety [#45913221263](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45913221263): success.
-- Installer integration [#45913221309](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45913221309): all five platform jobs passed.
-- Deploy Documentation [#45913221310](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45913221310): build passed; deploy intentionally skipped.
-- Android unit job in [#45913221311](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45913221311): passed after a previous retry hit Maven Central HTTP 429. Emulator instrumentation was still running at the time of this update.
-- General CI [#45913221463](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45913221463), Docker validation [#45913221242](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45913221242), and Desktop Build & Release [#45913221255](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45913221255) still had jobs running. Release/publish jobs were skipped as intended.
+- status: ok
+- environment: disposable-staging
 
-## Disposable Worker deployment
+That deployment is not the current engineering-branch code. The branch has since changed Worker/client code and migration/security work. No current-head staging deployment was performed because the remote D1 schema and recovery state remain unverified. The health route is availability evidence only, not proof of authenticated D1 operations.
 
-The last successful disposable deployment is [run #45909896048](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45909896048), deploying code commit `e63c6c97b01c420915d6dc0cff236bbeef3db467` to `neo-api-disposable-staging`. It reported Worker version `5ffdb1a6-390a-483a-a2c2-052d11e9ecf7` and a successful health response:
+An independent probe from this environment could not resolve the workers.dev hostname. I am not claiming a second live probe.
 
-```json
-{"status":"ok","environment":"disposable-staging"}
-```
+## D1 migration status
 
-Subsequent changes in this review are tests and documentation; the deployment workflow skipped on the latest head because no staging-deploy marker or manual deployment confirmation was supplied. The health result proves Worker availability only. It does not prove D1-backed authentication, browser sessions, or chat work remotely.
+Exact source database:
 
-## Google OAuth configuration status
+- Database: neo-staging-db
+- UUID: dd4c03d6-a286-4ac9-abbc-8f162b692acc
 
-- The GitHub Actions variable `NEO_GOOGLE_WEB_CLIENT_ID` was present and passed the disposable workflow's non-empty and `.apps.googleusercontent.com` format checks during preflight.
-- The disposable Worker template maps that value to `GOOGLE_WEB_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_IDS`.
-- The Google Auth Platform console's authorized JavaScript origins, redirect configuration, publishing/testing state, and test-user list could not be independently re-read through the connected repository tooling in this run.
-- No real browser OAuth round-trip was performed. A populated client ID variable is not proof that Google will accept the deployed origin or that the user can complete sign-in.
+The latest retrieved read-only preflight is run #45910522233:
 
-## Remote D1 status — blocking
+- The exact source UUID was verified.
+- A Time Travel bookmark was obtained.
+- SQL export was completed on the ephemeral runner, with Wrangler output suppressed to avoid exposing a temporary signed URL.
+- At that time, migrations 0001–0011 were pending.
+- The preflight skipped all schema writes; no migration was applied.
 
-Exact target:
-- Database: `neo-staging-db`
-- UUID: `dd4c03d6-a286-4ac9-abbc-8f162b692acc)
+Migration 0012 was added after that preflight. The remote migration list has not been rechecked against the current 12-file chain. Do not assume a current pending count until another read-only preflight.
 
-Latest read-only preflight: [run #45910522233](https://github.com/shivamchaudhary10082000-ctrl/OpenJarvis/actions/runs/45910522233), job `140217498701`:
+The migration approval file remains NO. The restore attestation remains RESTORE_VERIFIED=NO.
 
-- Exact D1 identity verified.
-- Time Travel bookmark obtained.
-- SQL export completed on the ephemeral runner; Wrangler output was suppressed to avoid logging its temporary signed export URL.
-- **All migrations 0001–0011 are pending.**
-- R2 backup upload, migration apply, and schema verification were skipped. No remote schema changes were made.
-- `infra/cloudflare/D1_MIGRATION_APPROVAL.txt` remains `NO`.
+## Migration and recovery verification on an isolated environment
 
-No durable encrypted backup, downloaded-ciphertext checksum verification, owner-held decryption, or isolated restore to a separate D1 database has been demonstrated.
+NEO exact D1 migration SQLite rehearsal run #46104374713 passed:
 
-## Backup/recovery gate
+- The remote migration gate's allow-list matches the exact 12-file migration chain.
+- All 12 migration SQL files executed against isolated SQLite.
+- 34 schema objects were created.
+- Foreign-key checks and SQLite integrity check passed.
+- The rehearsal verified provider reservation accounting, over-budget rejection, settlement, release, and migration 0012's immutable terminal-reservation trigger.
 
-The current `.github/workflows/neo-disposable-staging.yml` is not yet suitable for the required recovery sequence:
+This is isolated SQLite evidence only. It did not connect to or change Cloudflare D1.
 
-- `PREFLIGHT_ONLY` exports to temporary runner storage and skips R2.
-- `APPLY_0001_0011` runs the R2 upload/download-checksum step and then immediately applies migrations. There is no backup-only mode or owner-restore attestation pause.
-- The previously inspected D1 migration token had account-wide D1 Write scope. Do not use it as a substitute for a narrowly scoped read/export credential or create a broader token.
-- The R2 step was skipped in the latest preflight. GitHub secret values and the Cloudflare account's bucket inventory are not visible through this connector; therefore an unexecuted R2 step is not proof that a private bucket or bucket-scoped credentials are configured.
-- The detailed prerequisites and recovery order are in [D1_BACKUP_RECOVERY_RUNBOOK.md](D1_BACKUP_RECOVERY_RUNBOOK.md).
+NEO encrypted D1 backup artifact rehearsal run #46104374770 also passed:
 
-Do not set `APPLY_0001_0011` to obtain a backup. Keep the approval file at `NO`.
+- SQL-import sanitizer removed transaction wrappers and the reserved _cf_KV table in a synthetic fixture.
+- A synthetic database was encrypted before artifact upload.
+- Artifact download and checksum verification passed.
+- Tampering was detected.
+- Decryption, isolated SQLite restore, integrity, and foreign-key validation passed.
 
-## Provider isolation and spend guard
+This is a synthetic pipeline rehearsal, not a backup or restore of the real staging D1.
 
-The disposable Worker template has:
-- Primary and backup model URLs empty and model names `unset`.
-- Monthly USD spend limit `0`.
-- Monthly input-token and output-token limits `0`.
-- Per-provider prices and voice request ceilings `0`.
+## Backup and recovery gate
 
-The new authenticated chat integration test confirms the no-provider path returns `503 model_unconfigured` without an upstream call. No paid provider was activated or contacted.
+The recovery design does not depend on R2:
 
-## Remaining work, in safe order
+- The backup-only workflow requires a separate, narrowly scoped source-D1 export credential and the owner's public age recipient.
+- It exports SQL, encrypts before upload, and uploads ciphertext, checksum, and metadata only.
+- The private age identity remains owner-held and offline; it must never be placed in GitHub, repository files, chat, or runner storage.
+- The owner-local restore script requires a separate token scoped only to the recovery D1. It validates the exact target UUID and empty-target precondition, restores only to the recovery database, and compares schema and table contents with the decrypted source.
+- Migration apply remains separate and requires the exact backup artifact plus owner-local restore attestation. The current approval label is APPLY_0001_0012; both approval and restore attestation remain NO.
 
-1. Prove an existing private R2 bucket and bucket-scoped Object Read + Object Write credentials; prove a narrowly scoped D1 read/export credential. If unavailable, stop without creating resources or widening permissions.
-2. Implement and review a separate backup-only workflow. It must not apply migrations.
-3. Export the exact source D1, encrypt before upload with the owner's public age recipient, download the same ciphertext, and verify SHA-256.
-4. Owner decrypts offline with the owner-held private key and restores to a separate disposable D1. Record the backup object key/hash and restore evidence.
-5. Strengthen the apply workflow with an explicit restore attestation. Reconfirm the source UUID and pending migration set before applying only 0001–0011.
-6. Verify all 11 migration-history entries, all expected tables/indexes/triggers, foreign-key definitions and zero `PRAGMA foreign_key_check` violations. Keep scheduled maintenance disabled until verified; reset approval to `NO`.
-7. Only after the remote schema exists, run real Google browser login, challenge replay rejection, device enrollment, session issue/resume/logout, authenticated chat and the safe no-provider path against the live disposable Worker/D1.
-8. Keep provider URLs/secrets unset and budgets at zero. Production, release, billing, and Supabase remain out of scope.
+No real staging backup, owner-local decryption, or restore to the recovery D1 has been demonstrated.
+
+## Authentication readiness
+
+- The Google Web client ID variable was present and passed the format check during staging preflight.
+- Real Google browser OAuth, authorized-origin behavior, test-user configuration, and session issuance/resume/revocation against live D1 have not been verified.
+- The code-level OIDC/security tests are mocked and local-D1 tests.
+- The current deployed Worker is stale relative to the branch; the live health probe did not exercise the current branch's authentication or D1 schema.
+
+## Provider isolation and spending
+
+The disposable Worker configuration keeps provider URLs and model names unset and all spend/token/voice budgets at zero. The tested chat path returns model_unconfigured without an upstream call. No paid provider or billing activation was performed.
+
+## Required next steps
+
+1. Confirm or create a source-D1 export token scoped only to neo-staging-db and a separate recovery-D1 token scoped only to neo-staging-recovery-test. Do not reuse the previously inspected account-wide D1 Write token.
+2. Create/retain the owner-held age identity offline and place only its public recipient in the GitHub variable.
+3. Run the separate backup-only workflow, download the exact ciphertext artifact to the owner's device, and verify its checksum.
+4. Decrypt locally and restore to the separate recovery D1; capture schema, row comparison, integrity, and foreign-key evidence.
+5. Only after that evidence is reviewed, obtain explicit owner approval for a fresh preflight and any migration apply. No apply is authorized here.
+6. After remote migration and schema verification, perform a real Google OAuth round-trip, device enrollment, session issue/resume/logout/revocation, and authenticated safe no-provider smoke test.
 
 ## Explicit non-claims
 
-- No real Google sign-in, live D1 session, live authenticated chat, or D1 migration has been proven.
-- No durable staging backup or real restore has been proven.
-- Android emulator/CI checks do not equal physical-device validation.
-- A green Worker health endpoint does not equal a working end-to-end NEO deployment.
+- No remote D1 migration has been applied.
+- No durable real-staging backup or recovery restore has been proven.
+- No real Google sign-in or live session/authenticated chat has been proven.
+- The current branch Worker has not been deployed to staging.
+- No paid AI provider, billing, production, main-branch merge, or separate Supabase project has been touched.
